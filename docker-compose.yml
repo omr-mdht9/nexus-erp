@@ -1,0 +1,14 @@
+services:
+  erp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:///./erp.db
+      JWT_SECRET: ${JWT_SECRET}
+      NEXUS_INITIAL_ADMIN_USERNAME: ${NEXUS_INITIAL_ADMIN_USERNAME}
+      NEXUS_INITIAL_ADMIN_PASSWORD: ${NEXUS_INITIAL_ADMIN_PASSWORD}
+    volumes:
+      - erp_data:/app
+volumes:
+  erp_data:
