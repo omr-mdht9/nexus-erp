@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Boolean, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Boolean, UniqueConstraint, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./erp.db')
@@ -278,4 +278,9 @@ def trial_balance(_:User=Depends(current_user),s:Session=Depends(db)):
         if d or c: rows.append({'code':a.code,'name':a.name,'debit':round(d,2),'credit':round(c,2),'balance':round(d-c,2)})
     return rows
 @app.get('/api/health')
-def health(): return {'status':'ok','version':'0.2.0'}
+def health(s:Session=Depends(db)):
+    try:
+        s.execute(text('SELECT 1'))
+    except Exception:
+        raise HTTPException(503, 'Database is unavailable')
+    return {'status':'ok','database':'connected','version':'0.2.0'}
