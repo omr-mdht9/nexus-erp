@@ -97,7 +97,8 @@ class ProductIn(BaseModel): sku:str; name:str; category:str='General'; unit:str=
 class PartyIn(BaseModel): code:str; name:str; kind:str; phone:str=''; tax_id:str=''
 class WarehouseIn(BaseModel): code:str; name:str
 class InvoiceLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
-class InvoiceIn(BaseModel): kind:str; party_id:int; warehouse_id:int; lines:list[InvoiceLineIn]; tax_rate:float=14
+class InvoiceIn(BaseModel): kind:str; party_id:int; warehouse_id:int; lines:list[InvoiceLineIn]; tax_rate:float=14; post_now:bool=True
+class InvoiceWorkflowIn(BaseModel): action:str
 class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
@@ -235,7 +236,10 @@ def create_invoice(x:InvoiceIn,actor:User=Depends(require_roles('admin','account
     if not party or not wh or party.kind!=expected: raise HTTPException(400,'Invalid party or warehouse')
     subtotal=sum(l.qty*l.unit_price for l in x.lines); tax=subtotal*(x.tax_rate/100); total=subtotal+tax
     prefix='PINV' if x.kind=='purchase' else 'SINV'; no=f'{prefix}-{datetime.utcnow().strftime("%Y%m%d%H%M%S%f")[:17]}'
-    inv=Invoice(invoice_no=no,kind=x.kind,party_id=x.party_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax,total=total); s.add(inv); s.flush()
+    inv=Invoice(invoice_no=no,kind=x.kind,party_id=x.party_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax,total=total,status='posted' if x.post_now else 'draft'); s.add(inv); s.flush()
+    if not x.post_now:
+        audit(s,actor,'create_draft','invoice',inv.id,f'Invoice {inv.invoice_no}; {inv.kind}')
+        s.commit(); return {'id':inv.id,'invoice_no':inv.invoice_no,'total':total,'tax':tax,'status':inv.status}
     inv_acct=acct(s,'1300'); party_acct=acct(s,'2000' if x.kind=='purchase' else '1200'); vat=acct(s,'1350' if x.kind=='purchase' else '2100'); main=acct(s,'5100' if x.kind=='purchase' else '4000')
     lines=[]; cogs=0
     for l in x.lines:
@@ -252,6 +256,16 @@ def create_invoice(x:InvoiceIn,actor:User=Depends(require_roles('admin','account
         j=journal(s,f'Sale {no}',[(party_acct,total,0),(main,0,subtotal),(vat,0,tax),(acct(s,'5000'),cogs,0),(inv_acct,0,cogs)])
     audit(s,actor,'post','invoice',inv.id,f'{x.kind} {no}')
     s.commit(); return {'invoice_no':no,'subtotal':subtotal,'tax':tax,'total':total,'journal_no':j.entry_no}
+
+@app.post('/api/invoices/{invoice_id}/workflow')
+def invoice_workflow(invoice_id:int,x:InvoiceWorkflowIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    inv=s.get(Invoice,invoice_id)
+    if not inv: raise HTTPException(404,'Invoice not found')
+    allowed={'draft':{'submit':'submitted','cancel':'cancelled'},'submitted':{'approve':'approved','return':'draft','cancel':'cancelled'},'approved':{'return':'draft','cancel':'cancelled'}}
+    target=allowed.get(inv.status,{}).get(x.action)
+    if not target: raise HTTPException(400,f'Action {x.action} is not allowed while invoice is {inv.status}')
+    inv.status=target; audit(s,actor,'workflow_'+x.action,'invoice',inv.id,f'Invoice {inv.invoice_no}; status {target}'); s.commit()
+    return {'id':inv.id,'invoice_no':inv.invoice_no,'status':inv.status}
 
 @app.get('/api/invoices')
 def invoices(_:User=Depends(current_user),s:Session=Depends(db)):
