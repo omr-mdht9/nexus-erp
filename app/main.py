@@ -238,6 +238,9 @@ def create_invoice(x:InvoiceIn,actor:User=Depends(require_roles('admin','account
     prefix='PINV' if x.kind=='purchase' else 'SINV'; no=f'{prefix}-{datetime.utcnow().strftime("%Y%m%d%H%M%S%f")[:17]}'
     inv=Invoice(invoice_no=no,kind=x.kind,party_id=x.party_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax,total=total,status='posted' if x.post_now else 'draft'); s.add(inv); s.flush()
     if not x.post_now:
+        for l in x.lines:
+            if not s.get(Product,l.product_id): raise HTTPException(404,'Product not found')
+            s.add(InvoiceLine(invoice_id=inv.id,product_id=l.product_id,qty=l.qty,unit_price=l.unit_price,line_total=l.qty*l.unit_price))
         audit(s,actor,'create_draft','invoice',inv.id,f'Invoice {inv.invoice_no}; {inv.kind}')
         s.commit(); return {'id':inv.id,'invoice_no':inv.invoice_no,'total':total,'tax':tax,'status':inv.status}
     inv_acct=acct(s,'1300'); party_acct=acct(s,'2000' if x.kind=='purchase' else '1200'); vat=acct(s,'1350' if x.kind=='purchase' else '2100'); main=acct(s,'5100' if x.kind=='purchase' else '4000')
@@ -267,11 +270,32 @@ def invoice_workflow(invoice_id:int,x:InvoiceWorkflowIn,actor:User=Depends(requi
     inv.status=target; audit(s,actor,'workflow_'+x.action,'invoice',inv.id,f'Invoice {inv.invoice_no}; status {target}'); s.commit()
     return {'id':inv.id,'invoice_no':inv.invoice_no,'status':inv.status}
 
+@app.post('/api/invoices/{invoice_id}/post')
+def post_approved_invoice(invoice_id:int,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    inv=s.get(Invoice,invoice_id)
+    if not inv: raise HTTPException(404,'Invoice not found')
+    if inv.status!='approved': raise HTTPException(400,'Only an approved invoice can be posted')
+    wh=s.get(Warehouse,inv.warehouse_id)
+    inv_acct=acct(s,'1300'); party_acct=acct(s,'2000' if inv.kind=='purchase' else '1200'); vat=acct(s,'1350' if inv.kind=='purchase' else '2100'); main=acct(s,'5100' if inv.kind=='purchase' else '4000')
+    cogs=0
+    for line in s.query(InvoiceLine).filter_by(invoice_id=inv.id):
+        product=s.get(Product,line.product_id)
+        if not product: raise HTTPException(404,'Product not found')
+        if inv.kind=='purchase': move(s,product.id,wh.id,line.qty,'IN','purchase',inv.invoice_no)
+        else:
+            move(s,product.id,wh.id,line.qty,'OUT','sale',inv.invoice_no); cogs += line.qty*product.cost
+    if inv.kind=='purchase':
+        j=journal(s,f'Purchase {inv.invoice_no}',[(inv_acct,inv.subtotal,0),(vat,inv.tax_amount,0),(party_acct,0,inv.total)])
+    else:
+        j=journal(s,f'Sale {inv.invoice_no}',[(party_acct,inv.total,0),(main,0,inv.subtotal),(vat,0,inv.tax_amount),(acct(s,'5000'),cogs,0),(inv_acct,0,cogs)])
+    inv.status='posted'; audit(s,actor,'post','invoice',inv.id,f'{inv.kind} {inv.invoice_no}; journal {j.entry_no}')
+    s.commit(); return {'invoice_no':inv.invoice_no,'status':inv.status,'journal_no':j.entry_no}
+
 @app.get('/api/invoices')
 def invoices(_:User=Depends(current_user),s:Session=Depends(db)):
     out=[]
     for i in s.query(Invoice).order_by(Invoice.id.desc()).limit(100):
-        p=s.get(Party,i.party_id); out.append({'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'created_at':i.created_at.isoformat()})
+        p=s.get(Party,i.party_id); out.append({'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'created_at':i.created_at.isoformat()})
     return out
 
 @app.get('/api/boms')
