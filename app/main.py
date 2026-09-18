@@ -51,6 +51,8 @@ class Production(Base):
     __tablename__='productions'; id=Column(Integer,primary_key=True); production_no=Column(String(50),unique=True,nullable=False); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); qty=Column(Float,nullable=False); status=Column(String(20),default='posted'); total_cost=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class Payment(Base):
     __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Float,nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
+class AuditLog(Base):
+    __tablename__='audit_logs'; id=Column(Integer,primary_key=True); actor_id=Column(Integer,ForeignKey('users.id'),nullable=False); action=Column(String(80),nullable=False); entity_type=Column(String(50),nullable=False); entity_id=Column(Integer,nullable=True); detail=Column(String(255),default='',nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
 
@@ -111,6 +113,15 @@ def current_user(token:str=Depends(oauth2),s:Session=Depends(db)):
     if not u: raise HTTPException(401,'User not found')
     return u
 
+def require_roles(*roles):
+    def role_guard(user:User=Depends(current_user)):
+        if user.role not in roles: raise HTTPException(403,'Insufficient permission')
+        return user
+    return role_guard
+
+def audit(s:Session, actor:User, action:str, entity_type:str, entity_id:Optional[int]=None, detail:str=''):
+    s.add(AuditLog(actor_id=actor.id,action=action,entity_type=entity_type,entity_id=entity_id,detail=detail))
+
 def acct(s,code):
     a=s.query(Account).filter_by(code=code).first()
     if not a: raise HTTPException(500,f'Account {code} missing')
@@ -152,23 +163,25 @@ def products(_:User=Depends(current_user),s:Session=Depends(db)):
     for p in s.query(Product).order_by(Product.sku): out.append({'id':p.id,'sku':p.sku,'name':p.name,'category':p.category,'unit':p.unit,'cost':p.cost,'sale_price':p.sale_price,'qty':sum(x.qty for x in s.query(Stock).filter_by(product_id=p.id)),'reorder_level':p.reorder_level})
     return out
 @app.post('/api/products')
-def add_product(x:ProductIn,_:User=Depends(current_user),s:Session=Depends(db)):
+def add_product(x:ProductIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
     if s.query(Product).filter_by(sku=x.sku).first(): raise HTTPException(400,'SKU already exists')
     p=Product(**x.model_dump()); s.add(p); s.flush();
     for w in s.query(Warehouse).all(): s.add(Stock(product_id=p.id,warehouse_id=w.id,qty=0))
+    audit(s,actor,'create','product',p.id,f'SKU {p.sku}')
     s.commit(); return {'id':p.id}
 @app.get('/api/parties')
 def parties(_:User=Depends(current_user),s:Session=Depends(db)): return [{'id':p.id,'code':p.code,'name':p.name,'kind':p.kind,'phone':p.phone,'tax_id':p.tax_id} for p in s.query(Party).order_by(Party.code)]
 @app.post('/api/parties')
-def add_party(x:PartyIn,_:User=Depends(current_user),s:Session=Depends(db)):
+def add_party(x:PartyIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     if x.kind not in ('customer','supplier'): raise HTTPException(400,'kind must be customer or supplier')
-    p=Party(**x.model_dump()); s.add(p); s.commit(); return {'id':p.id}
+    p=Party(**x.model_dump()); s.add(p); s.flush(); audit(s,actor,'create','party',p.id,f'Code {p.code}'); s.commit(); return {'id':p.id}
 @app.get('/api/warehouses')
 def warehouses(_:User=Depends(current_user),s:Session=Depends(db)): return [{'id':w.id,'code':w.code,'name':w.name} for w in s.query(Warehouse).order_by(Warehouse.code)]
 @app.post('/api/warehouses')
-def add_wh(x:WarehouseIn,_:User=Depends(current_user),s:Session=Depends(db)):
+def add_wh(x:WarehouseIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
     w=Warehouse(**x.model_dump()); s.add(w); s.flush()
     for p in s.query(Product).all(): s.add(Stock(product_id=p.id,warehouse_id=w.id,qty=0))
+    audit(s,actor,'create','warehouse',w.id,f'Code {w.code}')
     s.commit(); return {'id':w.id}
 
 @app.get('/api/stock-moves')
@@ -179,7 +192,7 @@ def moves(_:User=Depends(current_user),s:Session=Depends(db)):
     return out
 
 @app.post('/api/invoices')
-def create_invoice(x:InvoiceIn,_:User=Depends(current_user),s:Session=Depends(db)):
+def create_invoice(x:InvoiceIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     if x.kind not in ('purchase','sale'): raise HTTPException(400,'kind must be purchase or sale')
     party=s.get(Party,x.party_id); wh=s.get(Warehouse,x.warehouse_id)
     expected='supplier' if x.kind=='purchase' else 'customer'
@@ -201,6 +214,7 @@ def create_invoice(x:InvoiceIn,_:User=Depends(current_user),s:Session=Depends(db
         j=journal(s,f'Purchase {no}',[(inv_acct,subtotal,0),(vat,tax,0),(party_acct,0,total)])
     else:
         j=journal(s,f'Sale {no}',[(party_acct,total,0),(main,0,subtotal),(vat,0,tax),(acct(s,'5000'),cogs,0),(inv_acct,0,cogs)])
+    audit(s,actor,'post','invoice',inv.id,f'{x.kind} {no}')
     s.commit(); return {'invoice_no':no,'subtotal':subtotal,'tax':tax,'total':total,'journal_no':j.entry_no}
 
 @app.get('/api/invoices')
@@ -220,12 +234,13 @@ def boms(_:User=Depends(current_user),s:Session=Depends(db)):
         out.append({'id':b.id,'product_id':b.product_id,'product':p.name,'sku':p.sku,'quantity':b.quantity,'lines':ls})
     return out
 @app.post('/api/boms')
-def create_bom(x:BOMIn,_:User=Depends(current_user),s:Session=Depends(db)):
+def create_bom(x:BOMIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
     if not s.get(Product,x.product_id): raise HTTPException(404,'Finished product not found')
     b=BOM(product_id=x.product_id,quantity=x.quantity); s.add(b); s.flush()
     for l in x.lines:
         if not s.get(Product,l.component_id): raise HTTPException(404,'Component not found')
         s.add(BOMLine(bom_id=b.id,component_id=l.component_id,qty=l.qty))
+    audit(s,actor,'create','bom',b.id,f'Product {b.product_id}')
     s.commit(); return {'id':b.id}
 @app.get('/api/productions')
 def productions(_:User=Depends(current_user),s:Session=Depends(db)):
@@ -234,7 +249,7 @@ def productions(_:User=Depends(current_user),s:Session=Depends(db)):
         b=s.get(BOM,p.bom_id); fg=s.get(Product,b.product_id); w=s.get(Warehouse,p.warehouse_id); out.append({'production_no':p.production_no,'product':fg.name,'sku':fg.sku,'qty':p.qty,'warehouse':w.name,'total_cost':p.total_cost,'status':p.status,'created_at':p.created_at.isoformat()})
     return out
 @app.post('/api/productions')
-def create_production(x:ProductionIn,_:User=Depends(current_user),s:Session=Depends(db)):
+def create_production(x:ProductionIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
     b=s.get(BOM,x.bom_id); w=s.get(Warehouse,x.warehouse_id)
     if not b or not w: raise HTTPException(404,'BOM or warehouse not found')
     fg=s.get(Product,b.product_id); no='PROD-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
@@ -249,17 +264,22 @@ def create_production(x:ProductionIn,_:User=Depends(current_user),s:Session=Depe
     fg.cost = total/x.qty if x.qty else fg.cost
     p=Production(production_no=no,bom_id=b.id,warehouse_id=w.id,qty=x.qty,total_cost=total); s.add(p); s.flush()
     lines=[(acct(s,'1300'),total,0),(acct(s,'1300'),0,total)]
-    j=journal(s,f'Production {no}',lines); s.commit(); return {'production_no':no,'total_cost':total,'unit_cost':total/x.qty}
+    j=journal(s,f'Production {no}',lines); audit(s,actor,'post','production',p.id,no); s.commit(); return {'production_no':no,'total_cost':total,'unit_cost':total/x.qty}
 
 @app.post('/api/payments')
-def create_payment(x:PaymentIn,_:User=Depends(current_user),s:Session=Depends(db)):
+def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     if x.kind not in ('receipt','payment'): raise HTTPException(400,'kind must be receipt or payment')
     party=s.get(Party,x.party_id); bank=acct(s,x.account_code)
     if not party or (x.kind=='receipt' and party.kind!='customer') or (x.kind=='payment' and party.kind!='supplier'): raise HTTPException(400,'Invalid party for payment')
     no='PAY-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
     party_acct=acct(s,'1200' if x.kind=='receipt' else '2000')
     j=journal(s,f'{x.kind.title()} {no}',[(bank,x.amount,0),(party_acct,0,x.amount)] if x.kind=='receipt' else [(party_acct,x.amount,0),(bank,0,x.amount)])
-    s.add(Payment(payment_no=no,kind=x.kind,party_id=party.id,amount=x.amount,account_id=bank.id)); s.commit(); return {'payment_no':no,'journal_no':j.entry_no}
+    payment=Payment(payment_no=no,kind=x.kind,party_id=party.id,amount=x.amount,account_id=bank.id); s.add(payment); s.flush(); audit(s,actor,'post','payment',payment.id,no); s.commit(); return {'payment_no':no,'journal_no':j.entry_no}
+
+@app.get('/api/audit-logs')
+def audit_logs(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
+    rows=s.query(AuditLog).order_by(AuditLog.id.desc()).limit(200).all()
+    return [{'id':r.id,'actor_id':r.actor_id,'action':r.action,'entity_type':r.entity_type,'entity_id':r.entity_id,'detail':r.detail,'created_at':r.created_at.isoformat()} for r in rows]
 
 @app.get('/api/journals')
 def journals(_:User=Depends(current_user),s:Session=Depends(db)):
