@@ -295,7 +295,7 @@ def post_approved_invoice(invoice_id:int,actor:User=Depends(require_roles('admin
 def invoices(_:User=Depends(current_user),s:Session=Depends(db)):
     out=[]
     for i in s.query(Invoice).order_by(Invoice.id.desc()).limit(100):
-        p=s.get(Party,i.party_id); out.append({'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'created_at':i.created_at.isoformat()})
+        p=s.get(Party,i.party_id); out.append({'id':i.id,'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'created_at':i.created_at.isoformat()})
     return out
 
 @app.get('/api/boms')
