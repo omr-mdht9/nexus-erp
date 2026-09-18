@@ -91,6 +91,8 @@ app.mount('/static',StaticFiles(directory='app/static'),name='static')
 def home(): return FileResponse('app/static/index.html')
 
 class TokenOut(BaseModel): access_token:str; token_type:str='bearer'
+class UserCreateIn(BaseModel): username:str=Field(min_length=3,max_length=80); password:str=Field(min_length=8,max_length=72); role:str='inventory'
+class UserUpdateIn(BaseModel): role:Optional[str]=None; active:Optional[bool]=None; password:Optional[str]=Field(default=None,min_length=8,max_length=72)
 class ProductIn(BaseModel): sku:str; name:str; category:str='General'; unit:str='KG'; cost:float=0; sale_price:float=0; reorder_level:float=0
 class PartyIn(BaseModel): code:str; name:str; kind:str; phone:str=''; tax_id:str=''
 class WarehouseIn(BaseModel): code:str; name:str
@@ -122,6 +124,11 @@ def require_roles(*roles):
 def audit(s:Session, actor:User, action:str, entity_type:str, entity_id:Optional[int]=None, detail:str=''):
     s.add(AuditLog(actor_id=actor.id,action=action,entity_type=entity_type,entity_id=entity_id,detail=detail))
 
+USER_ROLES = {'admin','accountant','inventory'}
+
+def validate_password(value:str):
+    if len(value.encode('utf-8')) > 72: raise HTTPException(400,'Password must be 72 bytes or fewer')
+
 def acct(s,code):
     a=s.query(Account).filter_by(code=code).first()
     if not a: raise HTTPException(500,f'Account {code} missing')
@@ -145,6 +152,35 @@ def move(s,pid,wid,qty,direction,ref_type,ref_no):
         if st.qty < qty: raise HTTPException(400,f'Insufficient stock for product {pid}: available {st.qty}, required {qty}')
         st.qty -= qty
     s.add(StockMove(product_id=pid,warehouse_id=wid,qty=qty,direction=direction,ref_type=ref_type,ref_no=ref_no))
+
+@app.get('/api/users')
+def list_users(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
+    return [{'id':u.id,'username':u.username,'role':u.role,'active':u.active} for u in s.query(User).order_by(User.username)]
+
+@app.post('/api/users')
+def create_user(x:UserCreateIn,actor:User=Depends(require_roles('admin')),s:Session=Depends(db)):
+    if x.role not in USER_ROLES: raise HTTPException(400,'Unknown role')
+    validate_password(x.password)
+    if s.query(User).filter_by(username=x.username).first(): raise HTTPException(400,'Username already exists')
+    user=User(username=x.username,password_hash=pwd.hash(x.password),role=x.role,active=True)
+    s.add(user); s.flush(); audit(s,actor,'create','user',user.id,f'Username {user.username}; role {user.role}'); s.commit()
+    return {'id':user.id,'username':user.username,'role':user.role,'active':user.active}
+
+@app.patch('/api/users/{user_id}')
+def update_user(user_id:int,x:UserUpdateIn,actor:User=Depends(require_roles('admin')),s:Session=Depends(db)):
+    user=s.get(User,user_id)
+    if not user: raise HTTPException(404,'User not found')
+    if x.role is not None:
+        if x.role not in USER_ROLES: raise HTTPException(400,'Unknown role')
+        if user.id == actor.id and x.role != 'admin': raise HTTPException(400,'You cannot remove your own administrator role')
+        user.role=x.role
+    if x.active is not None:
+        if user.id == actor.id and not x.active: raise HTTPException(400,'You cannot deactivate your own account')
+        user.active=x.active
+    if x.password is not None:
+        validate_password(x.password); user.password_hash=pwd.hash(x.password)
+    audit(s,actor,'update','user',user.id,f'Username {user.username}; role {user.role}; active {user.active}')
+    s.commit(); return {'id':user.id,'username':user.username,'role':user.role,'active':user.active}
 
 @app.get('/api/dashboard')
 def dashboard(_:User=Depends(current_user),s:Session=Depends(db)):
