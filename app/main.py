@@ -471,6 +471,20 @@ def journals(_:User=Depends(current_user),s:Session=Depends(db)):
             a=s.get(Account,l.account_id); ls.append({'account':a.code+' - '+a.name,'debit':l.debit,'credit':l.credit})
         out.append({'entry_no':j.entry_no,'description':j.description,'created_at':j.created_at.isoformat(),'lines':ls})
     return out
+@app.get('/api/financial-summary')
+def financial_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    balances={}
+    for account in s.query(Account):
+        debit=sum(line.debit for line in s.query(JournalLine).filter_by(account_id=account.id))
+        credit=sum(line.credit for line in s.query(JournalLine).filter_by(account_id=account.id))
+        balances[account.code]={'name':account.name,'type':account.type,'debit':round(debit,2),'credit':round(credit,2),'net':round(debit-credit,2)}
+    revenue=round(sum(-x['net'] for x in balances.values() if x['type']=='revenue'),2)
+    expenses=round(sum(x['net'] for x in balances.values() if x['type']=='expense'),2)
+    assets=round(sum(x['net'] for x in balances.values() if x['type']=='asset'),2)
+    liabilities=round(sum(-x['net'] for x in balances.values() if x['type']=='liability'),2)
+    equity=round(sum(-x['net'] for x in balances.values() if x['type']=='equity')+revenue-expenses,2)
+    return {'revenue':revenue,'expenses':expenses,'net_profit':round(revenue-expenses,2),'assets':assets,'liabilities':liabilities,'equity':equity}
+
 @app.get('/api/trial-balance')
 def trial_balance(_:User=Depends(current_user),s:Session=Depends(db)):
     rows=[]
