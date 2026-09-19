@@ -122,6 +122,7 @@ class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
 class SalesQuotationIn(BaseModel): customer_id:int; total:float=Field(gt=0)
+class SalesQuotationWorkflowIn(BaseModel): action:str
 class PurchaseOrderIn(BaseModel): supplier_id:int; total:float=Field(gt=0)
 class PurchaseOrderWorkflowIn(BaseModel): action:str
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
@@ -197,6 +198,16 @@ def create_sales_quotation(x:SalesQuotationIn,actor:User=Depends(require_roles('
     if not customer or customer.kind!='customer': raise HTTPException(400,'Invalid customer')
     no='QTN-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];q=SalesQuotation(quote_no=no,customer_id=customer.id,total=x.total);s.add(q);s.flush();audit(s,actor,'create','sales_quotation',q.id,no);s.commit()
     return {'id':q.id,'quote_no':no,'status':q.status}
+
+@app.post('/api/sales-quotations/{quote_id}/workflow')
+def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    q=s.get(SalesQuotation,quote_id)
+    if not q: raise HTTPException(404,'Sales quotation not found')
+    transitions={('draft','submit'):'submitted',('submitted','approve'):'approved',('draft','cancel'):'cancelled',('submitted','cancel'):'cancelled',('approved','expire'):'expired'}
+    target=transitions.get((q.status,x.action))
+    if not target: raise HTTPException(400,'Invalid sales quotation workflow action')
+    q.status=target;audit(s,actor,'workflow_'+x.action,'sales_quotation',q.id,f'{q.quote_no}; status {target}');s.commit()
+    return {'id':q.id,'quote_no':q.quote_no,'status':q.status}
 
 @app.get('/api/purchase-orders')
 def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
