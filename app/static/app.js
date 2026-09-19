@@ -60,3 +60,13 @@ newPayment=async function(){
 
 window.voidPaymentById=async function(paymentId){try{await api('/api/payments/'+encodeURIComponent(paymentId)+'/void',{method:'POST'});render()}catch(err){console.error(err.message)}};
 window.navigateTo=function(destination){page=destination;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===destination));document.querySelector('aside').classList.remove('open');render();};
+
+const renderAccountingReconciliation=accounting;
+accounting=async function(c){
+  await renderAccountingReconciliation(c);
+  if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;
+  const rows=await api('/api/reconciliation');
+  const card=document.createElement('div');card.className='card';card.style.marginTop='16px';
+  card.innerHTML='<h3>Invoice Reconciliation</h3><div class="muted">Posted invoices, allocated payments, and outstanding balances.</div><table class="table"><tr><th>Invoice</th><th>Type</th><th>Party</th><th>Total</th><th>Allocated</th><th>Balance</th><th>Status</th></tr>'+rows.map(r=>'<tr><td><b>'+esc(r.invoice_no)+'</b></td><td>'+esc(r.kind)+'</td><td>'+esc(r.party)+'</td><td>'+money(r.total)+'</td><td>'+money(r.allocated)+'</td><td>'+money(r.balance)+'</td><td><span class="badge '+(r.status==='settled'?'in':'out')+'">'+esc(r.status)+'</span></td></tr>').join('')+'</table>';
+  c.querySelector('.page').appendChild(card);
+};
