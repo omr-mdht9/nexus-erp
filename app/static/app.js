@@ -90,3 +90,25 @@ api=async function(path,opts){
   if(path==='/api/payments'&&Array.isArray(result))window.__nexusPaymentRows=result;
   return result;
 };
+
+
+const renderAccountingWithReferenceVoid=accounting;
+accounting=async function(c){
+  await renderAccountingWithReferenceVoid(c);
+  if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;
+  const card=Array.from(c.querySelectorAll('.card')).find(x=>x.querySelector('h3')?.textContent==='Receipts & Payments');
+  if(!card)return;
+  card.querySelectorAll('tr').forEach((row,index)=>{
+    if(index===0)return;
+    const cell=row.lastElementChild;
+    if(cell?.querySelector('button'))return;
+    const ref=row.querySelector('td b')?.textContent;
+    if(!ref)return;
+    const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';button.dataset.ref=ref;
+    button.onclick=async()=>{
+      if(!confirm('Void this payment and create a reversing journal entry?'))return;
+      try{await api('/api/payments/by-reference/'+encodeURIComponent(button.dataset.ref)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
+    };
+    cell.appendChild(button);
+  });
+}
