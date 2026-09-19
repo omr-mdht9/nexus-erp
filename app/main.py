@@ -191,7 +191,7 @@ def dashboard(_:User=Depends(current_user),s:Session=Depends(db)):
         q=sum(x.qty for x in stock if x.product_id==p.id)
         if q<=p.reorder_level: low.append({'sku':p.sku,'name':p.name,'qty':q,'reorder_level':p.reorder_level})
     sales=sum(i.total for i in s.query(Invoice).filter_by(kind='sale',status='posted').all()); purchases=sum(i.total for i in s.query(Invoice).filter_by(kind='purchase',status='posted').all())
-    return {'inventory_value':round(inventory_value,2),'sales':round(sales,2),'purchases':round(purchases,2),'products':len(products),'low_stock':low,'customers':s.query(Party).filter_by(kind='customer').count(),'suppliers':s.query(Party).filter_by(kind='supplier').count(),'productions':s.query(Production).count()}
+    return {'inventory_value':round(inventory_value,2),'sales':round(sales,2),'purchases':round(purchases,2),'products':len(products),'low_stock':low,'customers':s.query(Party).filter_by(kind='customer').count(),'suppliers':s.query(Party).filter_by(kind='supplier').count(),'productions':s.query(Production).count(),'workflow_pending':s.query(Invoice).filter(Invoice.status.in_(['submitted','approved'])).count()}
 @app.get('/api/accounts')
 def accounts(_:User=Depends(current_user),s:Session=Depends(db)): return [{'id':a.id,'code':a.code,'name':a.name,'type':a.type} for a in s.query(Account).order_by(Account.code)]
 @app.get('/api/products')
