@@ -359,6 +359,10 @@ def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','account
     if x.kind not in ('receipt','payment'): raise HTTPException(400,'kind must be receipt or payment')
     party=s.get(Party,x.party_id); bank=acct(s,x.account_code)
     if not party or (x.kind=='receipt' and party.kind!='customer') or (x.kind=='payment' and party.kind!='supplier'): raise HTTPException(400,'Invalid party for payment')
+    invoice_kind='sale' if x.kind=='receipt' else 'purchase'
+    posted_total=sum(inv.total for inv in s.query(Invoice).filter_by(party_id=party.id,kind=invoice_kind,status='posted'))
+    prior_paid=sum(p.amount for p in s.query(Payment).filter_by(party_id=party.id,kind=x.kind))
+    if x.amount > round(posted_total-prior_paid,2)+0.0001: raise HTTPException(400,'Payment exceeds the party open balance; allocate or reconcile earlier payments first')
     no='PAY-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
     party_acct=acct(s,'1200' if x.kind=='receipt' else '2000')
     j=journal(s,f'{x.kind.title()} {no}',[(bank,x.amount,0),(party_acct,0,x.amount)] if x.kind=='receipt' else [(party_acct,x.amount,0),(bank,0,x.amount)])
