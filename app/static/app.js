@@ -70,3 +70,15 @@ accounting=async function(c){
   card.innerHTML='<h3>Invoice Reconciliation</h3><div class="muted">Posted invoices, allocated payments, and outstanding balances.</div><table class="table"><tr><th>Invoice</th><th>Type</th><th>Party</th><th>Total</th><th>Allocated</th><th>Balance</th><th>Status</th></tr>'+rows.map(r=>'<tr><td><b>'+esc(r.invoice_no)+'</b></td><td>'+esc(r.kind)+'</td><td>'+esc(r.party)+'</td><td>'+money(r.total)+'</td><td>'+money(r.allocated)+'</td><td>'+money(r.balance)+'</td><td><span class="badge '+(r.status==='settled'?'in':'out')+'">'+esc(r.status)+'</span></td></tr>').join('')+'</table>';
   c.querySelector('.page').appendChild(card);
 };
+
+const renderAccountingAllocation=accounting;
+accounting=async function(c){
+ await renderAccountingAllocation(c);
+ if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;
+ const [rows,payments]=await Promise.all([api('/api/reconciliation'),api('/api/payments')]);
+ const card=c.querySelectorAll('.card')[c.querySelectorAll('.card').length-1];
+ const table=card.querySelector('table');
+ table.querySelector('tr').innerHTML+='<th>Action</th>';
+ rows.forEach((row,i)=>{const tr=table.querySelectorAll('tr')[i+1];const kind=row.kind==='sale'?'receipt':'payment';const payment=payments.find(p=>p.kind===kind&&p.party_id===row.party_id&&p.amount-p.allocated>=row.balance-.0001);const cell=document.createElement('td');if(row.balance>.0001&&payment){const b=document.createElement('button');b.className='primary';b.textContent='Allocate';b.onclick=()=>window.allocateExistingPayment(payment.id,row.id,row.balance);cell.appendChild(b)}else cell.textContent='-';tr.appendChild(cell)});
+};
+window.allocateExistingPayment=async function(paymentId,invoiceId,amount){if(!confirm('Allocate this existing payment to the invoice? No new cash transaction will be created.'))return;try{await api('/api/payments/'+paymentId+'/allocate',{method:'POST',body:JSON.stringify({invoice_id:invoiceId,amount:amount})});render()}catch(err){alert(err.message)}};
