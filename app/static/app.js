@@ -36,7 +36,7 @@ accounting=async function(c){
   const button=document.createElement('button');
   button.className='primary';button.textContent='+ Record Payment';button.onclick=newPayment;hero.appendChild(button);
   const card=document.createElement('div');card.className='card';card.style.marginTop='16px';
-  card.innerHTML='<h3>Receipts & Payments</h3><table class="table"><tr><th>Reference</th><th>Type</th><th>Party</th><th>Account</th><th>Amount</th><th>Date</th></tr>'+payments.map(p=>'<tr><td><b>'+esc(p.payment_no)+'</b></td><td>'+esc(p.kind)+'</td><td>'+esc(p.party)+'</td><td>'+esc(p.account)+'</td><td>'+money(p.amount)+'</td><td>'+new Date(p.created_at).toLocaleString()+'</td></tr>').join('')+'</table>'+(payments.length?'':'<div class="empty">No recorded receipts or payments.</div>');c.querySelector('.page').appendChild(card);
+  card.innerHTML='<h3>Receipts & Payments</h3><table class="table"><tr><th>Reference</th><th>Type</th><th>Party</th><th>Account</th><th>Amount</th><th>Date</th><th>Action</th></tr>'+payments.map(p=>'<tr><td><b>'+esc(p.payment_no)+'</b></td><td>'+esc(p.kind)+'</td><td>'+esc(p.party)+'</td><td>'+esc(p.account)+'</td><td>'+money(p.amount)+'</td><td>'+new Date(p.created_at).toLocaleString()+'</td><td><button class="danger" onclick="voidPaymentByReference('+JSON.stringify(p.payment_no)+')">Void</button></td></tr>').join('')+'</table>'+(payments.length?'':'<div class="empty">No recorded receipts or payments.</div>');c.querySelector('.page').appendChild(card);
 }
 async function newPayment(){
   let [parties,accounts]=await Promise.all([api('/api/parties'),api('/api/accounts')]);
@@ -58,73 +58,7 @@ newPayment=async function(){
 
 
 
-const displayAccountingWithPaymentActions=accounting;
-accounting=async function(c){
-  await displayAccountingWithPaymentActions(c);
-  if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;
-  const card=Array.from(c.querySelectorAll('.card')).find(x=>x.querySelector('h3')?.textContent==='Receipts & Payments');
-  if(!card)return;
-  const header=card.querySelector('tr');
-  if(header&&!header.querySelector('[data-payment-action-header]')){
-    const th=document.createElement('th');th.dataset.paymentActionHeader='1';th.textContent='Action';header.appendChild(th);
-  }
-  card.querySelectorAll('tr').forEach((row,index)=>{
-    if(index===0)return;
-    let cell=row.lastElementChild;
-    if(cell?.querySelector('.payment-void'))return;
-    const ref=row.querySelector('td b')?.textContent;
-    if(!ref)return;
-    cell=document.createElement('td');row.appendChild(cell);
-    const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';button.dataset.ref=ref;
-    button.onclick=async()=>{
-      if(!confirm('Void this payment and create a reversing journal entry?'))return;
-      try{await api('/api/payments/by-reference/'+encodeURIComponent(button.dataset.ref)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
-    };
-    cell.appendChild(button);
-  });
-}
-
-
-const ensurePaymentVoidControls=accounting;
-accounting=async function(c){
-  await ensurePaymentVoidControls(c);
-  const title=Array.from(c.querySelectorAll('h3')).find(h=>h.textContent.includes('Receipts & Payments'));
-  const card=title?.closest('.card');
-  if(!card)return;
-  const header=card.querySelector('tr');
-  if(header&&!header.querySelector('.payment-action-heading')){
-    const th=document.createElement('th');th.className='payment-action-heading';th.textContent='Action';header.appendChild(th);
-  }
-  Array.from(card.querySelectorAll('tr')).slice(1).forEach(row=>{
-    if(row.querySelector('.payment-void'))return;
-    const ref=row.querySelector('b')?.textContent;
-    if(!ref)return;
-    const cell=document.createElement('td');
-    const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';button.dataset.ref=ref;
-    button.onclick=async()=>{
-      if(!confirm('Void this payment and create a reversing journal entry?'))return;
-      try{await api('/api/payments/by-reference/'+encodeURIComponent(button.dataset.ref)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
-    };
-    cell.appendChild(button);row.appendChild(cell);
-  });
-}
-
-
-const renderPaymentVoidButtons=accounting;
-accounting=async function(c){
-  await renderPaymentVoidButtons(c);
-  const title=Array.from(c.querySelectorAll('h3')).find(h=>h.textContent.includes('Receipts & Payments'));
-  const card=title?.closest('.card');
-  if(!card)return;
-  Array.from(card.querySelectorAll('tr')).slice(1).forEach(row=>{
-    if(row.querySelector('.payment-void'))return;
-    const cell=document.createElement('td');
-    const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';
-    button.onclick=async()=>{
-      const ref=row.cells[0].textContent.trim();
-      if(!confirm('Void this payment and create a reversing journal entry?'))return;
-      try{await api('/api/payments/by-reference/'+encodeURIComponent(ref)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
-    };
-    cell.appendChild(button);row.appendChild(cell);
-  });
-}
+window.voidPaymentByReference=async function(paymentNo){
+  if(!confirm('Void this payment and create a reversing journal entry?'))return;
+  try{await api('/api/payments/by-reference/'+encodeURIComponent(paymentNo)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
+};
