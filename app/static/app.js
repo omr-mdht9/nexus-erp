@@ -82,3 +82,12 @@ accounting=async function(c){
  rows.forEach((row,i)=>{const tr=table.querySelectorAll('tr')[i+1];const kind=row.kind==='sale'?'receipt':'payment';const payment=payments.find(p=>p.kind===kind&&p.party_id===row.party_id&&p.amount-p.allocated>=row.balance-.0001);const cell=document.createElement('td');if(row.balance>.0001&&payment){const b=document.createElement('button');b.className='primary';b.textContent='Allocate';b.onclick=()=>window.allocateExistingPayment(payment.id,row.id,row.balance);cell.appendChild(b)}else cell.textContent='-';tr.appendChild(cell)});
 };
 window.allocateExistingPayment=async function(paymentId,invoiceId,amount){if(!confirm('Allocate this existing payment to the invoice? No new cash transaction will be created.'))return;try{await api('/api/payments/'+paymentId+'/allocate',{method:'POST',body:JSON.stringify({invoice_id:invoiceId,amount:amount})});render()}catch(err){alert(err.message)}};
+
+const renderAccountingAudit=accounting;
+accounting=async function(c){
+ await renderAccountingAudit(c);
+ if(!currentUser||currentUser.role!=='admin')return;
+ const logs=await api('/api/audit-logs');
+ const card=document.createElement('div');card.className='card';card.style.marginTop='16px';
+ card.innerHTML='<h3>Audit Trail</h3><div class="muted">Recent controlled actions across the ERP.</div><table class="table"><tr><th>When</th><th>Action</th><th>Record</th><th>Details</th></tr>'+logs.slice(0,20).map(x=>'<tr><td>'+new Date(x.created_at).toLocaleString()+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.entity_type)+' #'+x.entity_id+'</td><td>'+esc(x.detail)+'</td></tr>').join('')+'</table>';c.querySelector('.page').appendChild(card);
+};
