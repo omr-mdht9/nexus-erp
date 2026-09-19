@@ -471,6 +471,17 @@ def journals(_:User=Depends(current_user),s:Session=Depends(db)):
             a=s.get(Account,l.account_id); ls.append({'account':a.code+' - '+a.name,'debit':l.debit,'credit':l.credit})
         out.append({'entry_no':j.entry_no,'description':j.description,'created_at':j.created_at.isoformat(),'lines':ls})
     return out
+@app.get('/api/aging-summary')
+def aging_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    customers=suppliers=0
+    for inv in s.query(Invoice).filter_by(status='posted'):
+        allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id))
+        balance=inv.total-allocated
+        if balance>0.0001:
+            if inv.kind=='sale': customers+=balance
+            else: suppliers+=balance
+    return {'customer_open':round(customers,2),'supplier_open':round(suppliers,2)}
+
 @app.get('/api/cash-summary')
 def cash_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     receipts=sum(p.amount for p in s.query(Payment).filter_by(kind='receipt'))
