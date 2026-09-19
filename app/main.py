@@ -471,6 +471,12 @@ def journals(_:User=Depends(current_user),s:Session=Depends(db)):
             a=s.get(Account,l.account_id); ls.append({'account':a.code+' - '+a.name,'debit':l.debit,'credit':l.credit})
         out.append({'entry_no':j.entry_no,'description':j.description,'created_at':j.created_at.isoformat(),'lines':ls})
     return out
+@app.get('/api/cash-summary')
+def cash_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    receipts=sum(p.amount for p in s.query(Payment).filter_by(kind='receipt'))
+    payments=sum(p.amount for p in s.query(Payment).filter_by(kind='payment'))
+    return {'receipts':round(receipts,2),'payments':round(payments,2),'net_cash_flow':round(receipts-payments,2)}
+
 @app.get('/api/operations-summary')
 def operations_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     sales=sum(i.total for i in s.query(Invoice).filter_by(kind='sale',status='posted'))
