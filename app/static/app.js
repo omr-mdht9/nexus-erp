@@ -83,3 +83,28 @@ accounting=async function(c){
     cell.appendChild(button);
   });
 }
+
+
+const ensurePaymentVoidControls=accounting;
+accounting=async function(c){
+  await ensurePaymentVoidControls(c);
+  const title=Array.from(c.querySelectorAll('h3')).find(h=>h.textContent.includes('Receipts & Payments'));
+  const card=title?.closest('.card');
+  if(!card)return;
+  const header=card.querySelector('tr');
+  if(header&&!header.querySelector('.payment-action-heading')){
+    const th=document.createElement('th');th.className='payment-action-heading';th.textContent='Action';header.appendChild(th);
+  }
+  Array.from(card.querySelectorAll('tr')).slice(1).forEach(row=>{
+    if(row.querySelector('.payment-void'))return;
+    const ref=row.querySelector('b')?.textContent;
+    if(!ref)return;
+    const cell=document.createElement('td');
+    const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';button.dataset.ref=ref;
+    button.onclick=async()=>{
+      if(!confirm('Void this payment and create a reversing journal entry?'))return;
+      try{await api('/api/payments/by-reference/'+encodeURIComponent(button.dataset.ref)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
+    };
+    cell.appendChild(button);row.appendChild(cell);
+  });
+}
