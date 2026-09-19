@@ -116,6 +116,10 @@ def current_user(token:str=Depends(oauth2),s:Session=Depends(db)):
     if not u: raise HTTPException(401,'User not found')
     return u
 
+@app.get('/api/auth/me')
+def auth_me(user:User=Depends(current_user)):
+    return {'username':user.username,'role':user.role}
+
 def require_roles(*roles):
     def role_guard(user:User=Depends(current_user)):
         if user.role not in roles: raise HTTPException(403,'Insufficient permission')
