@@ -383,6 +383,17 @@ def open_invoices(kind:str,party_id:int,_:User=Depends(require_roles('admin','ac
         if balance>0.0001: out.append({'id':inv.id,'invoice_no':inv.invoice_no,'balance':balance})
     return out
 
+@app.post('/api/payments/{payment_id}/void')
+def void_payment(payment_id:int,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    payment=s.get(Payment,payment_id)
+    if not payment: raise HTTPException(404,'Payment not found')
+    bank=s.get(Account,payment.account_id); party_acct=acct(s,'1200' if payment.kind=='receipt' else '2000')
+    lines=[(party_acct,payment.amount,0),(bank,0,payment.amount)] if payment.kind=='receipt' else [(bank,payment.amount,0),(party_acct,0,payment.amount)]
+    j=journal(s,f'Void {payment.kind.title()} {payment.payment_no}',lines)
+    for allocation in s.query(PaymentAllocation).filter_by(payment_id=payment.id).all(): s.delete(allocation)
+    audit(s,actor,'void','payment',payment.id,f'{payment.payment_no}; reversal {j.entry_no}')
+    s.delete(payment); s.commit(); return {'payment_no':payment.payment_no,'journal_no':j.entry_no,'status':'voided'}
+
 @app.get('/api/audit-logs')
 def audit_logs(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
     rows=s.query(AuditLog).order_by(AuditLog.id.desc()).limit(200).all()
