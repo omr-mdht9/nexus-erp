@@ -379,6 +379,20 @@ def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','account
         s.add(PaymentAllocation(payment_id=payment.id,invoice_id=inv.id,amount=x.amount))
     audit(s,actor,'post','payment',payment.id,no); s.commit(); return {'payment_no':no,'journal_no':j.entry_no}
 
+@app.get('/api/reconciliation')
+def reconciliation(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    rows=[]
+    for inv in s.query(Invoice).filter_by(status='posted').order_by(Invoice.id.desc()).limit(100):
+        party=s.get(Party,inv.party_id)
+        allocations=s.query(PaymentAllocation).filter_by(invoice_id=inv.id).all()
+        allocated=round(sum(a.amount for a in allocations),2)
+        details=[]
+        for allocation in allocations:
+            payment=s.get(Payment,allocation.payment_id)
+            if payment: details.append({'payment_no':payment.payment_no,'amount':allocation.amount,'created_at':payment.created_at.isoformat()})
+        rows.append({'invoice_no':inv.invoice_no,'kind':inv.kind,'party':party.name if party else '?','total':inv.total,'allocated':allocated,'balance':round(inv.total-allocated,2),'status':'settled' if abs(inv.total-allocated)<0.0001 else 'open','payments':details})
+    return rows
+
 @app.get('/api/open-invoices')
 def open_invoices(kind:str,party_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     expected='sale' if kind=='receipt' else 'purchase'; out=[]
