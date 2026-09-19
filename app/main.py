@@ -483,7 +483,7 @@ def financial_summary(_:User=Depends(require_roles('admin','accountant')),s:Sess
     assets=round(sum(x['net'] for x in balances.values() if x['type']=='asset'),2)
     liabilities=round(sum(-x['net'] for x in balances.values() if x['type']=='liability'),2)
     equity=round(sum(-x['net'] for x in balances.values() if x['type']=='equity')+revenue-expenses,2)
-    return {'revenue':revenue,'expenses':expenses,'net_profit':round(revenue-expenses,2),'assets':assets,'liabilities':liabilities,'equity':equity}
+    return {'revenue':revenue,'expenses':expenses,'net_profit':round(revenue-expenses,2),'assets':assets,'liabilities':liabilities,'equity':equity,'cash':balances.get('1000',{}).get('net',0),'receivables':balances.get('1200',{}).get('net',0),'payables':round(-balances.get('2000',{}).get('net',0),2)}
 
 @app.get('/api/trial-balance')
 def trial_balance(_:User=Depends(current_user),s:Session=Depends(db)):
