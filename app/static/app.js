@@ -55,3 +55,38 @@ newPayment=async function(){
  let m=modal('<div class="card"><div class="modal-head"><div><h2>Record & Allocate Payment</h2><p class="muted">Apply the payment to one posted invoice.</p></div><button class="x">×</button></div><form id="allocationForm"><div class="form-grid"><select name="kind"><option value="receipt">Customer receipt</option><option value="payment">Supplier payment</option></select><select name="party_id"></select><select name="invoice_id"></select><select name="account_code">'+cash.map(a=>'<option value="'+a.code+'">'+esc(a.code)+' - '+esc(a.name)+'</option>').join('')+'</select><input name="amount" type="number" min="0.01" step="0.01" required></div><button class="primary">Record Allocation</button><div id="err"></div></form></div>');let f=m.querySelector('#allocationForm');
  let refresh=async()=>{let type=f.kind.value==='receipt'?'customer':'supplier';f.party_id.innerHTML=parties.filter(p=>p.kind===type).map(p=>'<option value="'+p.id+'">'+esc(p.code)+' - '+esc(p.name)+'</option>').join('');let inv=await api('/api/open-invoices?kind='+f.kind.value+'&party_id='+f.party_id.value);f.invoice_id.innerHTML=inv.map(x=>'<option value="'+x.id+'" data-balance="'+x.balance+'">'+esc(x.invoice_no)+' - balance '+money(x.balance)+'</option>').join('');if(inv.length)f.amount.value=inv[0].balance};
  f.kind.onchange=refresh;f.party_id.onchange=refresh;await refresh();f.onsubmit=async e=>{e.preventDefault();let p={kind:f.kind.value,party_id:+f.party_id.value,invoice_id:+f.invoice_id.value,account_code:f.account_code.value,amount:+f.amount.value};try{await api('/api/payments',{method:'POST',body:JSON.stringify(p)});m.remove();render()}catch(err){f.querySelector('#err').textContent=err.message}}}
+
+
+
+const renderAccountingWithPaymentVoid=accounting;
+accounting=async function(c){
+  await renderAccountingWithPaymentVoid(c);
+  if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;
+  const card=Array.from(c.querySelectorAll('.card')).find(x=>x.querySelector('h3')?.textContent==='Receipts & Payments');
+  if(!card)return;
+  const header=card.querySelector('tr');
+  if(header&&!header.querySelector('[data-payment-action-header]')){
+    const th=document.createElement('th');th.dataset.paymentActionHeader='1';th.textContent='Action';header.appendChild(th);
+    card.querySelectorAll('tr').forEach((row,index)=>{
+      if(index===0)return;
+      const ref=row.querySelector('td b')?.textContent||'';
+      const payment=window.__nexusPaymentRows?.find(p=>p.payment_no===ref);
+      const td=document.createElement('td');
+      if(payment){
+        const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';button.dataset.id=payment.id;button.dataset.ref=payment.payment_no;
+        button.onclick=async()=>{
+          if(!confirm('Void this payment and create a reversing journal entry?'))return;
+          try{await api('/api/payments/'+button.dataset.id+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
+        };
+        td.appendChild(button);
+      }
+      row.appendChild(td);
+    });
+  }
+}
+const nexusPaymentsApi=api;
+api=async function(path,opts){
+  const result=await nexusPaymentsApi(path,opts);
+  if(path==='/api/payments'&&Array.isArray(result))window.__nexusPaymentRows=result;
+  return result;
+};
