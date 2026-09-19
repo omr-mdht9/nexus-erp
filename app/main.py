@@ -113,7 +113,7 @@ def current_user(token:str=Depends(oauth2),s:Session=Depends(db)):
     try: data=jwt.decode(token,SECRET,algorithms=['HS256']); username=data.get('sub')
     except JWTError: raise HTTPException(401,'Invalid token')
     u=s.query(User).filter_by(username=username).first()
-    if not u: raise HTTPException(401,'User not found')
+    if not u or not u.active: raise HTTPException(401,'Account is inactive or unavailable')
     return u
 
 @app.get('/api/auth/me')
