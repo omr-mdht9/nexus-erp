@@ -70,6 +70,10 @@ def seed(s:Session):
         if not admin_username or not admin_password:
             raise RuntimeError('Set NEXUS_INITIAL_ADMIN_USERNAME and NEXUS_INITIAL_ADMIN_PASSWORD for the first start.')
         s.add(User(username=admin_username,password_hash=pwd.hash(admin_password),role='admin'))
+    reset_password=os.getenv('NEXUS_ADMIN_RESET_PASSWORD')
+    if reset_password:
+        admin=s.query(User).filter_by(username=os.getenv('NEXUS_INITIAL_ADMIN_USERNAME','admin')).first()
+        if admin: admin.password_hash=pwd.hash(reset_password)
     if not s.query(Account).first():
         rows=[('1000','Cash','asset'),('1100','Bank','asset'),('1200','Accounts Receivable','asset'),('1300','Inventory','asset'),('1350','Input VAT','asset'),('2000','Accounts Payable','liability'),('2100','Output VAT','liability'),('3000','Capital','equity'),('4000','Sales Revenue','revenue'),('4100','Other Revenue','revenue'),('5000','Cost of Goods Sold','expense'),('5100','Purchases','expense'),('5200','Operating Expenses','expense'),('5300','Production Variance','expense')]
         s.add_all([Account(code=c,name=n,type=t) for c,n,t in rows])
