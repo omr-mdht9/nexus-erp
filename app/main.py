@@ -344,6 +344,14 @@ def create_production(x:ProductionIn,actor:User=Depends(require_roles('admin','i
     lines=[(acct(s,'1300'),total,0),(acct(s,'1300'),0,total)]
     j=journal(s,f'Production {no}',lines); audit(s,actor,'post','production',p.id,no); s.commit(); return {'production_no':no,'total_cost':total,'unit_cost':total/x.qty}
 
+@app.get('/api/payments')
+def payments(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    out=[]
+    for payment in s.query(Payment).order_by(Payment.id.desc()).limit(100):
+        party=s.get(Party,payment.party_id); account=s.get(Account,payment.account_id)
+        out.append({'id':payment.id,'payment_no':payment.payment_no,'kind':payment.kind,'party':party.name if party else '?','amount':payment.amount,'account':account.code+' - '+account.name if account else '?','created_at':payment.created_at.isoformat()})
+    return out
+
 @app.post('/api/payments')
 def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     if x.kind not in ('receipt','payment'): raise HTTPException(400,'kind must be receipt or payment')
