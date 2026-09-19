@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import time
 from typing import Optional
 import os
 from fastapi import FastAPI, Depends, HTTPException
@@ -20,6 +21,9 @@ if not SECRET:
     raise RuntimeError('JWT_SECRET must be set before starting NEXUS ERP.')
 pwd = CryptContext(schemes=['bcrypt'], deprecated='auto')
 oauth2 = OAuth2PasswordBearer(tokenUrl='/api/auth/login')
+LOGIN_FAILURES = {}
+LOGIN_WINDOW_SECONDS = 900
+LOGIN_MAX_FAILURES = 5
 
 class User(Base):
     __tablename__='users'; id=Column(Integer,primary_key=True); username=Column(String(80),unique=True,nullable=False); password_hash=Column(String(255),nullable=False); role=Column(String(30),default='admin'); active=Column(Boolean,default=True)
@@ -117,8 +121,12 @@ class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
 
 @app.post('/api/auth/login',response_model=TokenOut)
 def login(form:OAuth2PasswordRequestForm=Depends(),s:Session=Depends(db)):
+    now=time.time(); failures=[t for t in LOGIN_FAILURES.get(form.username,[]) if now-t<LOGIN_WINDOW_SECONDS]
+    if len(failures)>=LOGIN_MAX_FAILURES: raise HTTPException(429,'Too many failed sign-in attempts. Try again later.')
     u=s.query(User).filter_by(username=form.username).first()
-    if not u or not u.active or not pwd.verify(form.password,u.password_hash): raise HTTPException(401,'Invalid credentials')
+    if not u or not u.active or not pwd.verify(form.password,u.password_hash):
+        LOGIN_FAILURES[form.username]=failures+[now]; raise HTTPException(401,'Invalid credentials')
+    LOGIN_FAILURES.pop(form.username,None)
     return {'access_token':jwt.encode({'sub':u.username,'role':u.role,'exp':datetime.utcnow()+timedelta(hours=12)},SECRET,algorithm='HS256'),'token_type':'bearer'}
 def current_user(token:str=Depends(oauth2),s:Session=Depends(db)):
     try: data=jwt.decode(token,SECRET,algorithms=['HS256']); username=data.get('sub')
