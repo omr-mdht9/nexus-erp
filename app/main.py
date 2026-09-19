@@ -396,6 +396,7 @@ def void_payment(payment_id:int,actor:User=Depends(require_roles('admin','accoun
     lines=[(party_acct,payment.amount,0),(bank,0,payment.amount)] if payment.kind=='receipt' else [(bank,payment.amount,0),(party_acct,0,payment.amount)]
     j=journal(s,f'Void {payment.kind.title()} {payment.payment_no}',lines)
     for allocation in s.query(PaymentAllocation).filter_by(payment_id=payment.id).all(): s.delete(allocation)
+    s.flush()
     audit(s,actor,'void','payment',payment.id,f'{payment_no}; reversal {j.entry_no}')
     s.delete(payment); s.commit(); return {'payment_no':payment_no,'journal_no':j.entry_no,'status':'voided'}
 
@@ -409,6 +410,7 @@ def void_payment_by_reference(payment_no:str,actor:User=Depends(require_roles('a
     lines=[(party_acct,payment.amount,0),(bank,0,payment.amount)] if payment.kind=='receipt' else [(bank,payment.amount,0),(party_acct,0,payment.amount)]
     j=journal(s,f'Void {payment.kind.title()} {payment.payment_no}',lines)
     for allocation in s.query(PaymentAllocation).filter_by(payment_id=payment.id).all(): s.delete(allocation)
+    s.flush()
     audit(s,actor,'void','payment',payment.id,f'{payment_no}; reversal {j.entry_no}')
     s.delete(payment); s.commit(); return {'payment_no':payment_no,'journal_no':j.entry_no,'status':'voided'}
 
