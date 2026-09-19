@@ -47,3 +47,11 @@ async function newPayment(){
   form.kind.onchange=refreshParties;refreshParties();
   form.onsubmit=async e=>{e.preventDefault();let payload={kind:form.kind.value,party_id:+form.party_id.value,account_code:form.account_code.value,amount:+form.amount.value};try{let r=await api('/api/payments',{method:'POST',body:JSON.stringify(payload)});m.remove();alert('Recorded '+r.payment_no);render()}catch(err){form.querySelector('#err').textContent=err.message}};
 }
+
+
+const paymentFormBase=newPayment;
+newPayment=async function(){
+ let [parties,accounts]=await Promise.all([api('/api/parties'),api('/api/accounts')]);let cash=accounts.filter(a=>a.code==='1000'||a.code==='1100');
+ let m=modal('<div class="card"><div class="modal-head"><div><h2>Record & Allocate Payment</h2><p class="muted">Apply the payment to one posted invoice.</p></div><button class="x">×</button></div><form id="allocationForm"><div class="form-grid"><select name="kind"><option value="receipt">Customer receipt</option><option value="payment">Supplier payment</option></select><select name="party_id"></select><select name="invoice_id"></select><select name="account_code">'+cash.map(a=>'<option value="'+a.code+'">'+esc(a.code)+' - '+esc(a.name)+'</option>').join('')+'</select><input name="amount" type="number" min="0.01" step="0.01" required></div><button class="primary">Record Allocation</button><div id="err"></div></form></div>');let f=m.querySelector('#allocationForm');
+ let refresh=async()=>{let type=f.kind.value==='receipt'?'customer':'supplier';f.party_id.innerHTML=parties.filter(p=>p.kind===type).map(p=>'<option value="'+p.id+'">'+esc(p.code)+' - '+esc(p.name)+'</option>').join('');let inv=await api('/api/open-invoices?kind='+f.kind.value+'&party_id='+f.party_id.value);f.invoice_id.innerHTML=inv.map(x=>'<option value="'+x.id+'" data-balance="'+x.balance+'">'+esc(x.invoice_no)+' - balance '+money(x.balance)+'</option>').join('');if(inv.length)f.amount.value=inv[0].balance};
+ f.kind.onchange=refresh;f.party_id.onchange=refresh;await refresh();f.onsubmit=async e=>{e.preventDefault();let p={kind:f.kind.value,party_id:+f.party_id.value,invoice_id:+f.invoice_id.value,account_code:f.account_code.value,amount:+f.amount.value};try{await api('/api/payments',{method:'POST',body:JSON.stringify(p)});m.remove();render()}catch(err){f.querySelector('#err').textContent=err.message}}}
