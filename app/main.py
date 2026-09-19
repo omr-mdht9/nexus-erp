@@ -152,6 +152,8 @@ USER_ROLES = {'admin','accountant','inventory'}
 
 def validate_password(value:str):
     if len(value.encode('utf-8')) > 72: raise HTTPException(400,'Password must be 72 bytes or fewer')
+    if not (any(c.islower() for c in value) and any(c.isupper() for c in value) and any(c.isdigit() for c in value) and any(not c.isalnum() for c in value)):
+        raise HTTPException(400,'Password must include uppercase, lowercase, number, and symbol')
 
 def acct(s,code):
     a=s.query(Account).filter_by(code=code).first()
