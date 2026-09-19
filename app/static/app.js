@@ -58,10 +58,7 @@ newPayment=async function(){
 
 
 
-window.voidPaymentByReference=async function(paymentNo){
-  if(!confirm('Void this payment and create a reversing journal entry?'))return;
-  try{await api('/api/payments/by-reference/'+encodeURIComponent(paymentNo)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
-};
+window.voidPaymentByReference=async function(paymentNo){try{await api('/api/payments/by-reference/'+encodeURIComponent(paymentNo)+'/void',{method:'POST'});render()}catch(err){console.error(err.message)}};
 
 
 window.navigateTo=function(destination){page=destination;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===destination));document.querySelector('aside').classList.remove('open');render();};
