@@ -109,6 +109,7 @@ class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
+class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
 
 @app.post('/api/auth/login',response_model=TokenOut)
 def login(form:OAuth2PasswordRequestForm=Depends(),s:Session=Depends(db)):
@@ -378,6 +379,19 @@ def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','account
         if x.amount>round(inv.total-allocated,2)+0.0001: raise HTTPException(400,'Payment exceeds invoice balance')
         s.add(PaymentAllocation(payment_id=payment.id,invoice_id=inv.id,amount=x.amount))
     audit(s,actor,'post','payment',payment.id,no); s.commit(); return {'payment_no':no,'journal_no':j.entry_no}
+
+@app.post('/api/payments/{payment_id}/allocate')
+def allocate_payment(payment_id:int,x:AllocationIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    payment=s.get(Payment,payment_id); inv=s.get(Invoice,x.invoice_id)
+    if not payment or not inv or inv.status!='posted': raise HTTPException(400,'Invalid payment or invoice')
+    expected='sale' if payment.kind=='receipt' else 'purchase'
+    if inv.kind!=expected or inv.party_id!=payment.party_id: raise HTTPException(400,'Payment and invoice must belong to the same party')
+    allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(payment_id=payment.id))
+    invoice_allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id))
+    if x.amount>round(payment.amount-allocated,2)+0.0001 or x.amount>round(inv.total-invoice_allocated,2)+0.0001: raise HTTPException(400,'Allocation exceeds available balance')
+    allocation=PaymentAllocation(payment_id=payment.id,invoice_id=inv.id,amount=x.amount);s.add(allocation);s.flush()
+    audit(s,actor,'allocate','payment',payment.id,f'{payment.payment_no}; {inv.invoice_no}; {x.amount}');s.commit()
+    return {'status':'allocated','amount':x.amount}
 
 @app.get('/api/reconciliation')
 def reconciliation(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
