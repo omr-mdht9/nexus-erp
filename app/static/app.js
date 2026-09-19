@@ -84,12 +84,7 @@ accounting=async function(c){
     });
   }
 }
-const nexusPaymentsApi=api;
-api=async function(path,opts){
-  const result=await nexusPaymentsApi(path,opts);
-  if(path==='/api/payments'&&Array.isArray(result))window.__nexusPaymentRows=result;
-  return result;
-};
+window.__nexusPaymentsApi=api;
 
 
 const renderAccountingWithReferenceVoid=accounting;
