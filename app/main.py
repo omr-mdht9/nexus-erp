@@ -53,6 +53,8 @@ class BOMLine(Base):
     __tablename__='bom_lines'; id=Column(Integer,primary_key=True); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); component_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False)
 class Production(Base):
     __tablename__='productions'; id=Column(Integer,primary_key=True); production_no=Column(String(50),unique=True,nullable=False); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); qty=Column(Float,nullable=False); status=Column(String(20),default='posted'); total_cost=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+class SalesQuotation(Base):
+    __tablename__='sales_quotations'; id=Column(Integer,primary_key=True); quote_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class PurchaseOrder(Base):
     __tablename__='purchase_orders'; id=Column(Integer,primary_key=True); po_no=Column(String(50),unique=True,nullable=False); supplier_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class Payment(Base):
@@ -119,6 +121,7 @@ class InvoiceWorkflowIn(BaseModel): action:str
 class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
+class SalesQuotationIn(BaseModel): customer_id:int; total:float=Field(gt=0)
 class PurchaseOrderIn(BaseModel): supplier_id:int; total:float=Field(gt=0)
 class PurchaseOrderWorkflowIn(BaseModel): action:str
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
@@ -183,6 +186,17 @@ def move(s,pid,wid,qty,direction,ref_type,ref_no):
         if st.qty < qty: raise HTTPException(400,f'Insufficient stock for product {pid}: available {st.qty}, required {qty}')
         st.qty -= qty
     s.add(StockMove(product_id=pid,warehouse_id=wid,qty=qty,direction=direction,ref_type=ref_type,ref_no=ref_no))
+
+@app.get('/api/sales-quotations')
+def sales_quotations(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    return [{'id':q.id,'quote_no':q.quote_no,'customer':s.get(Party,q.customer_id).name,'status':q.status,'total':q.total,'created_at':q.created_at.isoformat()} for q in s.query(SalesQuotation).order_by(SalesQuotation.id.desc()).limit(100)]
+
+@app.post('/api/sales-quotations')
+def create_sales_quotation(x:SalesQuotationIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    customer=s.get(Party,x.customer_id)
+    if not customer or customer.kind!='customer': raise HTTPException(400,'Invalid customer')
+    no='QTN-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];q=SalesQuotation(quote_no=no,customer_id=customer.id,total=x.total);s.add(q);s.flush();audit(s,actor,'create','sales_quotation',q.id,no);s.commit()
+    return {'id':q.id,'quote_no':no,'status':q.status}
 
 @app.get('/api/purchase-orders')
 def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
