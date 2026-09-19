@@ -120,6 +120,7 @@ class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
 class PurchaseOrderIn(BaseModel): supplier_id:int; total:float=Field(gt=0)
+class PurchaseOrderWorkflowIn(BaseModel): action:str
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
 class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
 
@@ -194,6 +195,16 @@ def create_purchase_order(x:PurchaseOrderIn,actor:User=Depends(require_roles('ad
     no='PO-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
     po=PurchaseOrder(po_no=no,supplier_id=supplier.id,total=x.total);s.add(po);s.flush();audit(s,actor,'create','purchase_order',po.id,no);s.commit()
     return {'id':po.id,'po_no':no,'status':po.status}
+
+@app.post('/api/purchase-orders/{po_id}/workflow')
+def purchase_order_workflow(po_id:int,x:PurchaseOrderWorkflowIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    po=s.get(PurchaseOrder,po_id)
+    if not po: raise HTTPException(404,'Purchase order not found')
+    transitions={('draft','submit'):'submitted',('submitted','approve'):'approved',('draft','cancel'):'cancelled',('submitted','cancel'):'cancelled',('approved','cancel'):'cancelled'}
+    target=transitions.get((po.status,x.action))
+    if not target: raise HTTPException(400,'Invalid purchase order workflow action')
+    po.status=target;audit(s,actor,'workflow_'+x.action,'purchase_order',po.id,f'{po.po_no}; status {target}');s.commit()
+    return {'id':po.id,'po_no':po.po_no,'status':po.status}
 
 @app.get('/api/users')
 def list_users(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
