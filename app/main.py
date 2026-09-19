@@ -53,6 +53,8 @@ class BOMLine(Base):
     __tablename__='bom_lines'; id=Column(Integer,primary_key=True); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); component_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False)
 class Production(Base):
     __tablename__='productions'; id=Column(Integer,primary_key=True); production_no=Column(String(50),unique=True,nullable=False); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); qty=Column(Float,nullable=False); status=Column(String(20),default='posted'); total_cost=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+class PurchaseOrder(Base):
+    __tablename__='purchase_orders'; id=Column(Integer,primary_key=True); po_no=Column(String(50),unique=True,nullable=False); supplier_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class Payment(Base):
     __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Float,nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class PaymentAllocation(Base):
@@ -117,6 +119,7 @@ class InvoiceWorkflowIn(BaseModel): action:str
 class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
+class PurchaseOrderIn(BaseModel): supplier_id:int; total:float=Field(gt=0)
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
 class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
 
@@ -179,6 +182,18 @@ def move(s,pid,wid,qty,direction,ref_type,ref_no):
         if st.qty < qty: raise HTTPException(400,f'Insufficient stock for product {pid}: available {st.qty}, required {qty}')
         st.qty -= qty
     s.add(StockMove(product_id=pid,warehouse_id=wid,qty=qty,direction=direction,ref_type=ref_type,ref_no=ref_no))
+
+@app.get('/api/purchase-orders')
+def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    return [{'id':p.id,'po_no':p.po_no,'supplier':s.get(Party,p.supplier_id).name,'status':p.status,'total':p.total,'created_at':p.created_at.isoformat()} for p in s.query(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(100)]
+
+@app.post('/api/purchase-orders')
+def create_purchase_order(x:PurchaseOrderIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    supplier=s.get(Party,x.supplier_id)
+    if not supplier or supplier.kind!='supplier': raise HTTPException(400,'Invalid supplier')
+    no='PO-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
+    po=PurchaseOrder(po_no=no,supplier_id=supplier.id,total=x.total);s.add(po);s.flush();audit(s,actor,'create','purchase_order',po.id,no);s.commit()
+    return {'id':po.id,'po_no':no,'status':po.status}
 
 @app.get('/api/users')
 def list_users(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
