@@ -58,47 +58,23 @@ newPayment=async function(){
 
 
 
-const renderAccountingWithPaymentVoid=accounting;
+const displayAccountingWithPaymentActions=accounting;
 accounting=async function(c){
-  await renderAccountingWithPaymentVoid(c);
+  await displayAccountingWithPaymentActions(c);
   if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;
   const card=Array.from(c.querySelectorAll('.card')).find(x=>x.querySelector('h3')?.textContent==='Receipts & Payments');
   if(!card)return;
   const header=card.querySelector('tr');
   if(header&&!header.querySelector('[data-payment-action-header]')){
     const th=document.createElement('th');th.dataset.paymentActionHeader='1';th.textContent='Action';header.appendChild(th);
-    card.querySelectorAll('tr').forEach((row,index)=>{
-      if(index===0)return;
-      const ref=row.querySelector('td b')?.textContent||'';
-      const payment=window.__nexusPaymentRows?.find(p=>p.payment_no===ref);
-      const td=document.createElement('td');
-      if(payment){
-        const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';button.dataset.id=payment.id;button.dataset.ref=payment.payment_no;
-        button.onclick=async()=>{
-          if(!confirm('Void this payment and create a reversing journal entry?'))return;
-          try{await api('/api/payments/'+button.dataset.id+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
-        };
-        td.appendChild(button);
-      }
-      row.appendChild(td);
-    });
   }
-}
-window.__nexusPaymentsApi=api;
-
-
-const renderAccountingWithReferenceVoid=accounting;
-accounting=async function(c){
-  await renderAccountingWithReferenceVoid(c);
-  if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;
-  const card=Array.from(c.querySelectorAll('.card')).find(x=>x.querySelector('h3')?.textContent==='Receipts & Payments');
-  if(!card)return;
   card.querySelectorAll('tr').forEach((row,index)=>{
     if(index===0)return;
-    const cell=row.lastElementChild;
-    if(cell?.querySelector('button'))return;
+    let cell=row.lastElementChild;
+    if(cell?.querySelector('.payment-void'))return;
     const ref=row.querySelector('td b')?.textContent;
     if(!ref)return;
+    cell=document.createElement('td');row.appendChild(cell);
     const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';button.dataset.ref=ref;
     button.onclick=async()=>{
       if(!confirm('Void this payment and create a reversing journal entry?'))return;
