@@ -108,3 +108,23 @@ accounting=async function(c){
     cell.appendChild(button);row.appendChild(cell);
   });
 }
+
+
+const renderPaymentVoidButtons=accounting;
+accounting=async function(c){
+  await renderPaymentVoidButtons(c);
+  const title=Array.from(c.querySelectorAll('h3')).find(h=>h.textContent.includes('Receipts & Payments'));
+  const card=title?.closest('.card');
+  if(!card)return;
+  Array.from(card.querySelectorAll('tr')).slice(1).forEach(row=>{
+    if(row.querySelector('.payment-void'))return;
+    const cell=document.createElement('td');
+    const button=document.createElement('button');button.className='danger payment-void';button.textContent='Void';
+    button.onclick=async()=>{
+      const ref=row.cells[0].textContent.trim();
+      if(!confirm('Void this payment and create a reversing journal entry?'))return;
+      try{await api('/api/payments/by-reference/'+encodeURIComponent(ref)+'/void',{method:'POST'});alert('Payment voided and reversal journal created.');render()}catch(err){alert(err.message)}
+    };
+    cell.appendChild(button);row.appendChild(cell);
+  });
+}
