@@ -51,6 +51,8 @@ class Production(Base):
     __tablename__='productions'; id=Column(Integer,primary_key=True); production_no=Column(String(50),unique=True,nullable=False); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); qty=Column(Float,nullable=False); status=Column(String(20),default='posted'); total_cost=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class Payment(Base):
     __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Float,nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
+class PaymentAllocation(Base):
+    __tablename__='payment_allocations'; id=Column(Integer,primary_key=True); payment_id=Column(Integer,ForeignKey('payments.id'),nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),nullable=False); amount=Column(Float,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class AuditLog(Base):
     __tablename__='audit_logs'; id=Column(Integer,primary_key=True); actor_id=Column(Integer,ForeignKey('users.id'),nullable=False); action=Column(String(80),nullable=False); entity_type=Column(String(50),nullable=False); entity_id=Column(Integer,nullable=True); detail=Column(String(255),default='',nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 
@@ -102,7 +104,7 @@ class InvoiceWorkflowIn(BaseModel): action:str
 class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
-class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'
+class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
 
 @app.post('/api/auth/login',response_model=TokenOut)
 def login(form:OAuth2PasswordRequestForm=Depends(),s:Session=Depends(db)):
@@ -360,7 +362,22 @@ def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','account
     no='PAY-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
     party_acct=acct(s,'1200' if x.kind=='receipt' else '2000')
     j=journal(s,f'{x.kind.title()} {no}',[(bank,x.amount,0),(party_acct,0,x.amount)] if x.kind=='receipt' else [(party_acct,x.amount,0),(bank,0,x.amount)])
-    payment=Payment(payment_no=no,kind=x.kind,party_id=party.id,amount=x.amount,account_id=bank.id); s.add(payment); s.flush(); audit(s,actor,'post','payment',payment.id,no); s.commit(); return {'payment_no':no,'journal_no':j.entry_no}
+    payment=Payment(payment_no=no,kind=x.kind,party_id=party.id,amount=x.amount,account_id=bank.id); s.add(payment); s.flush()
+    if x.invoice_id is not None:
+        inv=s.get(Invoice,x.invoice_id); expected='sale' if x.kind=='receipt' else 'purchase'
+        if not inv or inv.status!='posted' or inv.party_id!=party.id or inv.kind!=expected: raise HTTPException(400,'Invalid invoice for this payment')
+        allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id))
+        if x.amount>round(inv.total-allocated,2)+0.0001: raise HTTPException(400,'Payment exceeds invoice balance')
+        s.add(PaymentAllocation(payment_id=payment.id,invoice_id=inv.id,amount=x.amount))
+    audit(s,actor,'post','payment',payment.id,no); s.commit(); return {'payment_no':no,'journal_no':j.entry_no}
+
+@app.get('/api/open-invoices')
+def open_invoices(kind:str,party_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    expected='sale' if kind=='receipt' else 'purchase'; out=[]
+    for inv in s.query(Invoice).filter_by(status='posted',party_id=party_id,kind=expected):
+        allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id)); balance=round(inv.total-allocated,2)
+        if balance>0.0001: out.append({'id':inv.id,'invoice_no':inv.invoice_no,'balance':balance})
+    return out
 
 @app.get('/api/audit-logs')
 def audit_logs(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
