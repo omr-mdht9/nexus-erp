@@ -356,7 +356,7 @@ def payments(_:User=Depends(require_roles('admin','accountant')),s:Session=Depen
     out=[]
     for payment in s.query(Payment).order_by(Payment.id.desc()).limit(100):
         party=s.get(Party,payment.party_id); account=s.get(Account,payment.account_id)
-        out.append({'id':payment.id,'payment_no':payment.payment_no,'kind':payment.kind,'party':party.name if party else '?','amount':payment.amount,'account':account.code+' - '+account.name if account else '?','created_at':payment.created_at.isoformat()})
+        out.append({'id':payment.id,'payment_no':payment.payment_no,'kind':payment.kind,'party_id':payment.party_id,'party':party.name if party else '?','amount':payment.amount,'allocated':round(sum(a.amount for a in s.query(PaymentAllocation).filter_by(payment_id=payment.id)),2),'account':account.code+' - '+account.name if account else '?','created_at':payment.created_at.isoformat()})
     return out
 
 @app.post('/api/payments')
@@ -404,7 +404,7 @@ def reconciliation(_:User=Depends(require_roles('admin','accountant')),s:Session
         for allocation in allocations:
             payment=s.get(Payment,allocation.payment_id)
             if payment: details.append({'payment_no':payment.payment_no,'amount':allocation.amount,'created_at':payment.created_at.isoformat()})
-        rows.append({'invoice_no':inv.invoice_no,'kind':inv.kind,'party':party.name if party else '?','total':inv.total,'allocated':allocated,'balance':round(inv.total-allocated,2),'status':'settled' if abs(inv.total-allocated)<0.0001 else 'open','payments':details})
+        rows.append({'id':inv.id,'party_id':inv.party_id,'invoice_no':inv.invoice_no,'kind':inv.kind,'party':party.name if party else '?','total':inv.total,'allocated':allocated,'balance':round(inv.total-allocated,2),'status':'settled' if abs(inv.total-allocated)<0.0001 else 'open','payments':details})
     return rows
 
 @app.get('/api/open-invoices')
