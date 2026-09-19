@@ -99,6 +99,7 @@ async def security_headers(request, call_next):
     response.headers['X-Content-Type-Options']='nosniff'
     response.headers['X-Frame-Options']='DENY'
     response.headers['Referrer-Policy']='same-origin'
+    response.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
     return response
 
 @app.get('/')
