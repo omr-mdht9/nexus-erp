@@ -168,6 +168,26 @@ class SafetyWorkflowTests(unittest.TestCase):
         self.assertEqual({m["direction"] for m in related}, {"IN", "OUT"})
         self.assertEqual(sum(m["qty"] for m in related), 4)
 
+    def test_accountant_cannot_adjust_stock(self):
+        user = self.client.post(
+            "/api/users",
+            json={"username": "adjustmentreviewer", "password": "ReviewerTest1!", "role": "accountant"},
+            headers=self.headers,
+        )
+        user.raise_for_status()
+        login = self.client.post(
+            "/api/auth/login",
+            data={"username": "adjustmentreviewer", "password": "ReviewerTest1!"},
+        )
+        login.raise_for_status()
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        response = self.client.post(
+            "/api/stock-adjustments",
+            json={"product_id": 1, "warehouse_id": 1, "direction": "IN", "qty": 1, "reason": "Cycle count correction"},
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_stock_adjustment_requires_reason_and_is_traceable(self):
         invalid = self.client.post(
             "/api/stock-adjustments",
