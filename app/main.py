@@ -129,6 +129,7 @@ class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[B
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
 class CommercialLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
 class SalesQuotationIn(BaseModel): customer_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
+class QuotationConvertIn(BaseModel): warehouse_id:int; tax_rate:float=Field(default=14,ge=0)
 class SalesQuotationWorkflowIn(BaseModel): action:str
 class PurchaseOrderIn(BaseModel): supplier_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
 class PurchaseOrderWorkflowIn(BaseModel): action:str
@@ -620,3 +621,18 @@ def commercial_pipeline(_:User=Depends(require_roles('admin','accountant')),s:Se
     def snapshot(rows):
         return {'draft':sum(1 for r in rows if r.status=='draft'),'submitted':sum(1 for r in rows if r.status=='submitted'),'approved':sum(1 for r in rows if r.status=='approved'),'active_total':round(sum(r.total for r in rows if r.status in active),2)}
     return {'purchase_orders':snapshot(purchase_orders),'sales_quotations':snapshot(quotations)}
+
+
+@app.post('/api/sales-quotations/{quote_id}/convert')
+def convert_sales_quotation(quote_id:int,x:QuotationConvertIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    q=s.get(SalesQuotation,quote_id)
+    if not q or q.status!='approved': raise HTTPException(400,'Only approved quotations can be converted')
+    if s.query(SalesQuotationConversion).filter_by(quotation_id=q.id).first(): raise HTTPException(400,'Quotation has already been converted')
+    if not s.get(Warehouse,x.warehouse_id): raise HTTPException(400,'Invalid warehouse')
+    lines=s.query(SalesQuotationLine).filter_by(quotation_id=q.id).all()
+    if not lines: raise HTTPException(400,'Quotation requires product lines before conversion')
+    subtotal=round(sum(line.qty*line.unit_price for line in lines),2); tax_amount=round(subtotal*x.tax_rate/100,2); total=round(subtotal+tax_amount,2)
+    no='S-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; invoice=Invoice(invoice_no=no,kind='sale',party_id=q.customer_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
+    for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
+    s.add(SalesQuotationConversion(quotation_id=q.id,invoice_id=invoice.id));audit(s,actor,'convert','sales_quotation',q.id,f'{q.quote_no} to draft {no}');s.commit()
+    return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
