@@ -573,3 +573,12 @@ def health(s:Session=Depends(db)):
     except Exception:
         raise HTTPException(503, 'Database is unavailable')
     return {'status':'ok','database':'connected','version':'0.2.0'}
+
+
+@app.get('/api/commercial-pipeline')
+def commercial_pipeline(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    purchase_orders=s.query(PurchaseOrder).all(); quotations=s.query(SalesQuotation).all()
+    active={'draft','submitted','approved'}
+    def snapshot(rows):
+        return {'draft':sum(1 for r in rows if r.status=='draft'),'submitted':sum(1 for r in rows if r.status=='submitted'),'approved':sum(1 for r in rows if r.status=='approved'),'active_total':round(sum(r.total for r in rows if r.status in active),2)}
+    return {'purchase_orders':snapshot(purchase_orders),'sales_quotations':snapshot(quotations)}
