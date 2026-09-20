@@ -209,3 +209,7 @@ accounting=async function(c){await renderAuditFilter(c);if(!currentUser||current
 
 const renderUserAccessExport=users;
 users=async function(c){await renderUserAccessExport(c);if(!currentUser||currentUser.role!=='admin')return;const rows=await api('/api/users'),button=document.createElement('button');button.textContent='Export Access CSV';button.onclick=()=>{const csv=[['Username','Role','Status'],...rows.map(u=>[u.username,u.role,u.active?'Active':'Inactive'])].map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n'),url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),link=document.createElement('a');link.href=url;link.download='nexus-user-access.csv';link.click();URL.revokeObjectURL(url)};c.querySelector('.hero').appendChild(button)};
+
+
+const renderCommercialCreator=invoices;
+invoices=async function(c,type){await renderCommercialCreator(c,type);if(type!=='purchasing'&&type!=='sales')return;if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;const rows=await api(type==='purchasing'?'/api/purchase-orders':'/api/sales-quotations');const card=c.querySelectorAll('.card')[c.querySelectorAll('.card').length-1];const table=card.querySelector('table');if(!table||table.dataset.creatorColumn)return;table.dataset.creatorColumn='true';table.querySelector('tr').insertCell(-1).outerHTML='<th>Created By</th>';rows.forEach((row,i)=>{const cell=table.querySelectorAll('tr')[i+1].insertCell(-1);cell.textContent=row.created_by||'—'})};
