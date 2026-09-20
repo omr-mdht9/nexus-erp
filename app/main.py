@@ -673,3 +673,9 @@ def convert_purchase_order(po_id:int,x:QuotationConvertIn,actor:User=Depends(req
 def health(s:Session=Depends(db)):
     s.execute(text('SELECT 1'))
     return {'status':'ok','database':'connected'}
+
+
+@app.get('/api/system-checks')
+def system_checks(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
+    s.execute(text('SELECT 1'))
+    return {'database':'connected','pending_invoice_review':s.query(Invoice).filter(Invoice.status.in_(['submitted','approved'])).count(),'active_users':s.query(User).filter_by(active=True).count(),'audit_records':s.query(AuditLog).count()}
