@@ -227,3 +227,16 @@ window.newStockTransfer=async function(){
 
 const renderStockTransferButton=inventory;
 inventory=async function(c){await renderStockTransferButton(c);if(!currentUser||!['admin','inventory'].includes(currentUser.role))return;const hero=c.querySelector('.hero');const button=document.createElement('button');button.className='primary';button.textContent='Transfer Stock';button.onclick=window.newStockTransfer;hero.appendChild(button)};
+
+
+window.newStockAdjustment=async function(){
+  const [products,warehouses]=await Promise.all([api('/api/products'),api('/api/warehouses')]);
+  const warehouseOptions=warehouses.map(w=>'<option value="'+w.id+'">'+esc(w.code)+' - '+esc(w.name)+'</option>').join('');
+  const productOptions=products.map(p=>'<option value="'+p.id+'">'+esc(p.sku)+' - '+esc(p.name)+' (on hand: '+p.qty+')</option>').join('');
+  const m=modal('<div class="card"><div class="modal-head"><h2>Stock Adjustment</h2><button class="x">×</button></div><div class="muted">Records a stock-count correction with a required reason. This does not create a financial transaction.</div><form id="adjustmentForm"><label>Product</label><select name="product_id">'+productOptions+'</select><label>Warehouse</label><select name="warehouse_id">'+warehouseOptions+'</select><label>Adjustment</label><select name="direction"><option value="IN">Increase stock</option><option value="OUT">Decrease stock</option></select><label>Quantity</label><input name="qty" type="number" min="0.0001" step="0.0001" required><label>Reason</label><input name="reason" minlength="3" maxlength="160" required placeholder="For example: cycle count correction"><button class="primary">Record Adjustment</button><div id="err"></div></form></div>');
+  m.querySelector('.x').onclick=()=>m.remove();
+  m.querySelector('#adjustmentForm').onsubmit=async e=>{e.preventDefault();if(!confirm('Record this stock adjustment?'))return;const body={product_id:+e.target.product_id.value,warehouse_id:+e.target.warehouse_id.value,direction:e.target.direction.value,qty:+e.target.qty.value,reason:e.target.reason.value};try{const result=await api('/api/stock-adjustments',{method:'POST',body:JSON.stringify(body)});m.remove();alert('Adjustment '+result.reference+' recorded.');render()}catch(err){m.querySelector('#err').textContent=err.message}};
+};
+
+const renderStockAdjustmentButton=inventory;
+inventory=async function(c){await renderStockAdjustmentButton(c);if(!currentUser||!['admin','inventory'].includes(currentUser.role))return;const hero=c.querySelector('.hero');const button=document.createElement('button');button.className='primary';button.textContent='Adjust Stock';button.onclick=window.newStockAdjustment;hero.appendChild(button)};
