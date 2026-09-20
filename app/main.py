@@ -124,6 +124,7 @@ class ProductIn(BaseModel): sku:str; name:str; category:str='General'; unit:str=
 class PartyIn(BaseModel): code:str; name:str; kind:str; phone:str=''; tax_id:str=''
 class WarehouseIn(BaseModel): code:str; name:str
 class StockTransferIn(BaseModel): product_id:int; from_warehouse_id:int; to_warehouse_id:int; qty:float=Field(gt=0)
+class StockAdjustmentIn(BaseModel): product_id:int; warehouse_id:int; direction:str; qty:float=Field(gt=0); reason:str=Field(min_length=3,max_length=160)
 class InvoiceLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
 class InvoiceIn(BaseModel): kind:str; party_id:int; warehouse_id:int; lines:list[InvoiceLineIn]; tax_rate:float=14; post_now:bool=True
 class InvoiceWorkflowIn(BaseModel): action:str
@@ -371,6 +372,18 @@ def stock_transfer(x:StockTransferIn,actor:User=Depends(require_roles('admin','i
     audit(s,actor,'transfer','stock_transfer',None,f'{reference}; {product.sku}; {source.code} to {destination.code}; qty {x.qty}')
     s.commit()
     return {'reference':reference,'product':product.sku,'from_warehouse':source.code,'to_warehouse':destination.code,'qty':x.qty}
+
+@app.post('/api/stock-adjustments')
+def stock_adjustment(x:StockAdjustmentIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    if x.direction not in ('IN','OUT'): raise HTTPException(400,'Adjustment direction must be IN or OUT')
+    product=s.get(Product,x.product_id); warehouse=s.get(Warehouse,x.warehouse_id)
+    if not product: raise HTTPException(404,'Product not found')
+    if not warehouse: raise HTTPException(400,'Warehouse is required')
+    reference='ADJ-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
+    move(s,product.id,warehouse.id,x.qty,x.direction,'adjustment',reference)
+    audit(s,actor,'adjust','stock_adjustment',None,f'{reference}; {product.sku}; {warehouse.code}; {x.direction}; qty {x.qty}; {x.reason}')
+    s.commit()
+    return {'reference':reference,'product':product.sku,'warehouse':warehouse.code,'direction':x.direction,'qty':x.qty,'reason':x.reason}
 
 @app.post('/api/invoices')
 def create_invoice(x:InvoiceIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
