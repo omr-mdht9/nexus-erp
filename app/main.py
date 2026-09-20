@@ -662,3 +662,9 @@ def convert_purchase_order(po_id:int,x:QuotationConvertIn,actor:User=Depends(req
     no='P-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];invoice=Invoice(invoice_no=no,kind='purchase',party_id=po.supplier_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
     for line in lines:s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
     s.add(PurchaseOrderConversion(purchase_order_id=po.id,invoice_id=invoice.id));audit(s,actor,'convert','purchase_order',po.id,f'{po.po_no} to draft {no}');s.commit();return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
+
+
+@app.get('/api/health')
+def health(s:Session=Depends(db)):
+    s.execute(text('SELECT 1'))
+    return {'status':'ok','database':'connected'}
