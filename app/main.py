@@ -638,3 +638,17 @@ def convert_sales_quotation(quote_id:int,x:QuotationConvertIn,actor:User=Depends
     for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
     s.add(SalesQuotationConversion(quotation_id=q.id,invoice_id=invoice.id));audit(s,actor,'convert','sales_quotation',q.id,f'{q.quote_no} to draft {no}');s.commit()
     return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
+
+
+@app.post('/api/purchase-orders/{po_id}/convert')
+def convert_purchase_order(po_id:int,x:QuotationConvertIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    po=s.get(PurchaseOrder,po_id)
+    if not po or po.status!='approved': raise HTTPException(400,'Only approved purchase orders can be converted')
+    if s.query(PurchaseOrderConversion).filter_by(purchase_order_id=po.id).first(): raise HTTPException(400,'Purchase order has already been converted')
+    if not s.get(Warehouse,x.warehouse_id): raise HTTPException(400,'Invalid warehouse')
+    lines=s.query(PurchaseOrderLine).filter_by(purchase_order_id=po.id).all()
+    if not lines: raise HTTPException(400,'Purchase order requires product lines before conversion')
+    subtotal=round(sum(line.qty*line.unit_price for line in lines),2); tax_amount=round(subtotal*x.tax_rate/100,2); total=round(subtotal+tax_amount,2)
+    no='P-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];invoice=Invoice(invoice_no=no,kind='purchase',party_id=po.supplier_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
+    for line in lines:s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
+    s.add(PurchaseOrderConversion(purchase_order_id=po.id,invoice_id=invoice.id));audit(s,actor,'convert','purchase_order',po.id,f'{po.po_no} to draft {no}');s.commit();return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
