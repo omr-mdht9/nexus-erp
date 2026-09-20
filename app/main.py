@@ -57,6 +57,10 @@ class SalesQuotation(Base):
     __tablename__='sales_quotations'; id=Column(Integer,primary_key=True); quote_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class PurchaseOrder(Base):
     __tablename__='purchase_orders'; id=Column(Integer,primary_key=True); po_no=Column(String(50),unique=True,nullable=False); supplier_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+class SalesQuotationLine(Base):
+    __tablename__='sales_quotation_lines'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
+class PurchaseOrderLine(Base):
+    __tablename__='purchase_order_lines'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
 class Payment(Base):
     __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Float,nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class PaymentAllocation(Base):
@@ -121,9 +125,10 @@ class InvoiceWorkflowIn(BaseModel): action:str
 class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
-class SalesQuotationIn(BaseModel): customer_id:int; total:float=Field(gt=0)
+class CommercialLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
+class SalesQuotationIn(BaseModel): customer_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
 class SalesQuotationWorkflowIn(BaseModel): action:str
-class PurchaseOrderIn(BaseModel): supplier_id:int; total:float=Field(gt=0)
+class PurchaseOrderIn(BaseModel): supplier_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
 class PurchaseOrderWorkflowIn(BaseModel): action:str
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
 class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
