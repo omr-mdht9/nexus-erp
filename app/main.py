@@ -397,7 +397,7 @@ def invoice_workflow(invoice_id:int,x:InvoiceWorkflowIn,actor:User=Depends(requi
     allowed={'draft':{'submit':'submitted','cancel':'cancelled'},'submitted':{'approve':'approved','return':'draft','cancel':'cancelled'},'approved':{'return':'draft','cancel':'cancelled'}}
     target=allowed.get(inv.status,{}).get(x.action)
     if not target: raise HTTPException(400,f'Action {x.action} is not allowed while invoice is {inv.status}')
-    creator=s.query(AuditLog).filter_by(entity_type='invoice',entity_id=inv.id,action='create').order_by(AuditLog.id.asc()).first()
+    creator=s.query(AuditLog).filter(AuditLog.entity_type=='invoice',AuditLog.entity_id==inv.id,AuditLog.action.in_(['create','create_draft'])).order_by(AuditLog.id.asc()).first()
     if x.action=='approve' and creator and creator.actor_id==actor.id: raise HTTPException(403,'Invoice creator cannot approve the same invoice')
     inv.status=target; audit(s,actor,'workflow_'+x.action,'invoice',inv.id,f'Invoice {inv.invoice_no}; status {target}'); s.commit()
     return {'id':inv.id,'invoice_no':inv.invoice_no,'status':inv.status}
@@ -407,7 +407,7 @@ def post_approved_invoice(invoice_id:int,actor:User=Depends(require_roles('admin
     inv=s.get(Invoice,invoice_id)
     if not inv: raise HTTPException(404,'Invoice not found')
     if inv.status!='approved': raise HTTPException(400,'Only an approved invoice can be posted')
-    creator=s.query(AuditLog).filter_by(entity_type='invoice',entity_id=inv.id,action='create').order_by(AuditLog.id.asc()).first()
+    creator=s.query(AuditLog).filter(AuditLog.entity_type=='invoice',AuditLog.entity_id==inv.id,AuditLog.action.in_(['create','create_draft'])).order_by(AuditLog.id.asc()).first()
     if creator and creator.actor_id==actor.id: raise HTTPException(403,'Invoice creator cannot post the same invoice')
     wh=s.get(Warehouse,inv.warehouse_id)
     inv_acct=acct(s,'1300'); party_acct=acct(s,'2000' if inv.kind=='purchase' else '1200'); vat=acct(s,'1350' if inv.kind=='purchase' else '2100'); main=acct(s,'5100' if inv.kind=='purchase' else '4000')
