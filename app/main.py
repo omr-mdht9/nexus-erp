@@ -419,6 +419,13 @@ def invoices(_:User=Depends(current_user),s:Session=Depends(db)):
         out.append({'id':i.id,'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'source_document':source,'created_at':i.created_at.isoformat()})
     return out
 
+@app.get('/api/invoices/{invoice_id}')
+def invoice_detail(invoice_id:int,_:User=Depends(current_user),s:Session=Depends(db)):
+    invoice=s.get(Invoice,invoice_id)
+    if not invoice: raise HTTPException(404,'Invoice not found')
+    lines=s.query(InvoiceLine).filter_by(invoice_id=invoice.id).all()
+    return {'id':invoice.id,'invoice_no':invoice.invoice_no,'status':invoice.status,'total':invoice.total,'lines':[{'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':line.line_total} for line in lines]}
+
 @app.get('/api/boms')
 def boms(_:User=Depends(current_user),s:Session=Depends(db)):
     out=[]
