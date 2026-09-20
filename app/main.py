@@ -201,8 +201,17 @@ def sales_quotations(_:User=Depends(require_roles('admin','accountant')),s:Sessi
 def create_sales_quotation(x:SalesQuotationIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     customer=s.get(Party,x.customer_id)
     if not customer or customer.kind!='customer': raise HTTPException(400,'Invalid customer')
-    no='QTN-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];q=SalesQuotation(quote_no=no,customer_id=customer.id,total=x.total);s.add(q);s.flush();audit(s,actor,'create','sales_quotation',q.id,no);s.commit()
-    return {'id':q.id,'quote_no':no,'status':q.status}
+    total=x.total
+    if x.lines:
+        total=0
+        for line in x.lines:
+            if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on quotation')
+            total+=line.qty*line.unit_price
+    if not total or total<=0: raise HTTPException(400,'Quotation total or line items are required')
+    no='QTN-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];q=SalesQuotation(quote_no=no,customer_id=customer.id,total=total);s.add(q);s.flush()
+    for line in x.lines: s.add(SalesQuotationLine(quotation_id=q.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price))
+    audit(s,actor,'create','sales_quotation',q.id,no);s.commit()
+    return {'id':q.id,'quote_no':no,'status':q.status,'total':q.total,'line_count':len(x.lines)}
 
 @app.post('/api/sales-quotations/{quote_id}/workflow')
 def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -222,9 +231,17 @@ def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Sessio
 def create_purchase_order(x:PurchaseOrderIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     supplier=s.get(Party,x.supplier_id)
     if not supplier or supplier.kind!='supplier': raise HTTPException(400,'Invalid supplier')
-    no='PO-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
-    po=PurchaseOrder(po_no=no,supplier_id=supplier.id,total=x.total);s.add(po);s.flush();audit(s,actor,'create','purchase_order',po.id,no);s.commit()
-    return {'id':po.id,'po_no':no,'status':po.status}
+    total=x.total
+    if x.lines:
+        total=0
+        for line in x.lines:
+            if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on purchase order')
+            total+=line.qty*line.unit_price
+    if not total or total<=0: raise HTTPException(400,'Purchase order total or line items are required')
+    no='PO-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];po=PurchaseOrder(po_no=no,supplier_id=supplier.id,total=total);s.add(po);s.flush()
+    for line in x.lines: s.add(PurchaseOrderLine(purchase_order_id=po.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price))
+    audit(s,actor,'create','purchase_order',po.id,no);s.commit()
+    return {'id':po.id,'po_no':no,'status':po.status,'total':po.total,'line_count':len(x.lines)}
 
 @app.post('/api/purchase-orders/{po_id}/workflow')
 def purchase_order_workflow(po_id:int,x:PurchaseOrderWorkflowIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
