@@ -232,6 +232,8 @@ def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=
     transitions={('draft','submit'):'submitted',('submitted','approve'):'approved',('draft','cancel'):'cancelled',('submitted','cancel'):'cancelled',('approved','expire'):'expired'}
     target=transitions.get((q.status,x.action))
     if not target: raise HTTPException(400,'Invalid sales quotation workflow action')
+    creator=s.query(AuditLog).filter_by(entity_type='sales_quotation',entity_id=q.id,action='create').order_by(AuditLog.id.asc()).first()
+    if x.action=='approve' and creator and creator.actor_id==actor.id: raise HTTPException(403,'Quotation creator cannot approve the same quotation')
     q.status=target;audit(s,actor,'workflow_'+x.action,'sales_quotation',q.id,f'{q.quote_no}; status {target}');s.commit()
     return {'id':q.id,'quote_no':q.quote_no,'status':q.status}
 
@@ -269,6 +271,8 @@ def purchase_order_workflow(po_id:int,x:PurchaseOrderWorkflowIn,actor:User=Depen
     transitions={('draft','submit'):'submitted',('submitted','approve'):'approved',('draft','cancel'):'cancelled',('submitted','cancel'):'cancelled',('approved','cancel'):'cancelled'}
     target=transitions.get((po.status,x.action))
     if not target: raise HTTPException(400,'Invalid purchase order workflow action')
+    creator=s.query(AuditLog).filter_by(entity_type='purchase_order',entity_id=po.id,action='create').order_by(AuditLog.id.asc()).first()
+    if x.action=='approve' and creator and creator.actor_id==actor.id: raise HTTPException(403,'Purchase order creator cannot approve the same purchase order')
     po.status=target;audit(s,actor,'workflow_'+x.action,'purchase_order',po.id,f'{po.po_no}; status {target}');s.commit()
     return {'id':po.id,'po_no':po.po_no,'status':po.status}
 
