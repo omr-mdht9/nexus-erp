@@ -133,3 +133,8 @@ invoices=async function(c,type){await renderSalesQuotationActions(c,type);if(typ
 
 const renderApprovedPurchaseOrderCancel=invoices;
 invoices=async function(c,type){await renderApprovedPurchaseOrderCancel(c,type);if(type!=='purchasing'||!currentUser||!['admin','accountant'].includes(currentUser.role))return;const rows=await api('/api/purchase-orders');const card=c.querySelectorAll('.card')[c.querySelectorAll('.card').length-1];const table=card.querySelector('table');rows.forEach((p,i)=>{if(p.status!=='approved')return;const cell=table.querySelectorAll('tr')[i+1].lastElementChild;cell.innerHTML='<button class="danger">Cancel</button>';cell.querySelector('button').onclick=()=>window.purchaseOrderAction(p.id,'cancel')})};
+
+const purchaseOrderWorkflowActionBase=window.purchaseOrderAction;
+window.purchaseOrderAction=async function(id,action){if(action==='cancel'&&!confirm('Cancel this purchase order? This status change cannot be reversed.'))return;return purchaseOrderWorkflowActionBase(id,action)};
+const salesQuotationWorkflowActionBase=window.salesQuotationAction;
+window.salesQuotationAction=async function(id,action){if((action==='cancel'||action==='expire')&&!confirm((action==='cancel'?'Cancel':'Expire')+' this sales quotation? This status change cannot be reversed.'))return;return salesQuotationWorkflowActionBase(id,action)};
