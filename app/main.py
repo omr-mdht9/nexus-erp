@@ -200,7 +200,11 @@ def move(s,pid,wid,qty,direction,ref_type,ref_no):
 
 @app.get('/api/sales-quotations')
 def sales_quotations(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
-    return [{'id':q.id,'quote_no':q.quote_no,'customer':s.get(Party,q.customer_id).name,'status':q.status,'total':q.total,'created_at':q.created_at.isoformat()} for q in s.query(SalesQuotation).order_by(SalesQuotation.id.desc()).limit(100)]
+    def creator_for(q):
+        entry=s.query(AuditLog).filter_by(entity_type='sales_quotation',entity_id=q.id,action='create').order_by(AuditLog.id.asc()).first()
+        user=s.get(User,entry.actor_id) if entry else None
+        return user.username if user else '—'
+    return [{'id':q.id,'quote_no':q.quote_no,'customer':s.get(Party,q.customer_id).name,'status':q.status,'total':q.total,'created_at':q.created_at.isoformat(),'created_by':creator_for(q)} for q in s.query(SalesQuotation).order_by(SalesQuotation.id.desc()).limit(100)]
 
 @app.get('/api/sales-quotations/{quote_id}')
 def sales_quotation_detail(quote_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -239,7 +243,11 @@ def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=
 
 @app.get('/api/purchase-orders')
 def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
-    return [{'id':p.id,'po_no':p.po_no,'supplier':s.get(Party,p.supplier_id).name,'status':p.status,'total':p.total,'created_at':p.created_at.isoformat()} for p in s.query(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(100)]
+    def creator_for(po):
+        entry=s.query(AuditLog).filter_by(entity_type='purchase_order',entity_id=po.id,action='create').order_by(AuditLog.id.asc()).first()
+        user=s.get(User,entry.actor_id) if entry else None
+        return user.username if user else '—'
+    return [{'id':p.id,'po_no':p.po_no,'supplier':s.get(Party,p.supplier_id).name,'status':p.status,'total':p.total,'created_at':p.created_at.isoformat(),'created_by':creator_for(p)} for p in s.query(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(100)]
 
 @app.get('/api/purchase-orders/{po_id}')
 def purchase_order_detail(po_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
