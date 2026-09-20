@@ -123,6 +123,7 @@ class UserUpdateIn(BaseModel): role:Optional[str]=None; active:Optional[bool]=No
 class ProductIn(BaseModel): sku:str; name:str; category:str='General'; unit:str='KG'; cost:float=0; sale_price:float=0; reorder_level:float=0
 class PartyIn(BaseModel): code:str; name:str; kind:str; phone:str=''; tax_id:str=''
 class WarehouseIn(BaseModel): code:str; name:str
+class StockTransferIn(BaseModel): product_id:int; from_warehouse_id:int; to_warehouse_id:int; qty:float=Field(gt=0)
 class InvoiceLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
 class InvoiceIn(BaseModel): kind:str; party_id:int; warehouse_id:int; lines:list[InvoiceLineIn]; tax_rate:float=14; post_now:bool=True
 class InvoiceWorkflowIn(BaseModel): action:str
@@ -357,6 +358,19 @@ def moves(_:User=Depends(current_user),s:Session=Depends(db)):
     for m in rows:
         p=s.get(Product,m.product_id); w=s.get(Warehouse,m.warehouse_id); out.append({'id':m.id,'product':p.name if p else '?','warehouse':w.name if w else '?','qty':m.qty,'direction':m.direction,'ref_type':m.ref_type,'ref_no':m.ref_no,'created_at':m.created_at.isoformat()})
     return out
+
+@app.post('/api/stock-transfers')
+def stock_transfer(x:StockTransferIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    product=s.get(Product,x.product_id); source=s.get(Warehouse,x.from_warehouse_id); destination=s.get(Warehouse,x.to_warehouse_id)
+    if not product: raise HTTPException(404,'Product not found')
+    if not source or not destination: raise HTTPException(400,'Source and destination warehouses are required')
+    if source.id==destination.id: raise HTTPException(400,'Source and destination warehouses must be different')
+    reference='TRF-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
+    move(s,product.id,source.id,x.qty,'OUT','transfer',reference)
+    move(s,product.id,destination.id,x.qty,'IN','transfer',reference)
+    audit(s,actor,'transfer','stock_transfer',None,f'{reference}; {product.sku}; {source.code} to {destination.code}; qty {x.qty}')
+    s.commit()
+    return {'reference':reference,'product':product.sku,'from_warehouse':source.code,'to_warehouse':destination.code,'qty':x.qty}
 
 @app.post('/api/invoices')
 def create_invoice(x:InvoiceIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
