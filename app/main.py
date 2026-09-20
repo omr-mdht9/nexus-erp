@@ -63,6 +63,8 @@ class PurchaseOrderLine(Base):
     __tablename__='purchase_order_lines'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
 class SalesQuotationConversion(Base):
     __tablename__='sales_quotation_conversions'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),unique=True,nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),unique=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
+class PurchaseOrderConversion(Base):
+    __tablename__='purchase_order_conversions'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),unique=True,nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),unique=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class Payment(Base):
     __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Float,nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class PaymentAllocation(Base):
