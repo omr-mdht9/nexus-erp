@@ -188,6 +188,20 @@ class SafetyWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_stock_adjustment_cannot_reduce_below_available_stock(self):
+        added = self.client.post(
+            "/api/stock-adjustments",
+            json={"product_id": 2, "warehouse_id": 1, "direction": "IN", "qty": 1, "reason": "Opening count"},
+            headers=self.headers,
+        )
+        added.raise_for_status()
+        response = self.client.post(
+            "/api/stock-adjustments",
+            json={"product_id": 2, "warehouse_id": 1, "direction": "OUT", "qty": 2, "reason": "Count correction"},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_stock_adjustment_requires_reason_and_is_traceable(self):
         invalid = self.client.post(
             "/api/stock-adjustments",
