@@ -61,6 +61,71 @@ class SafetyWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_invoice_creator_cannot_approve_or_post_own_draft(self):
+        created = self.client.post(
+            "/api/invoices",
+            json={
+                "kind": "sale",
+                "party_id": 2,
+                "warehouse_id": 1,
+                "lines": [{"product_id": 1, "qty": 1, "unit_price": 100}],
+                "post_now": False,
+            },
+            headers=self.headers,
+        )
+        created.raise_for_status()
+        invoice_id = created.json()["id"]
+        self.assertEqual(
+            self.client.post(
+                f"/api/invoices/{invoice_id}/workflow",
+                json={"action": "submit"},
+                headers=self.headers,
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/invoices/{invoice_id}/workflow",
+                json={"action": "approve"},
+                headers=self.headers,
+            ).status_code,
+            403,
+        )
+
+        reviewer = self.client.post(
+            "/api/users",
+            json={
+                "username": "reviewer",
+                "password": "ReviewerTest1!",
+                "role": "accountant",
+            },
+            headers=self.headers,
+        )
+        reviewer.raise_for_status()
+        reviewer_login = self.client.post(
+            "/api/auth/login",
+            data={"username": "reviewer", "password": "ReviewerTest1!"},
+        )
+        reviewer_login.raise_for_status()
+        reviewer_headers = {
+            "Authorization": f"Bearer {reviewer_login.json()['access_token']}"
+        }
+        self.assertEqual(
+            self.client.post(
+                f"/api/invoices/{invoice_id}/workflow",
+                json={"action": "approve"},
+                headers=reviewer_headers,
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/invoices/{invoice_id}/post",
+                headers=self.headers,
+            ).status_code,
+            403,
+        )
+
     def test_purchase_order_creator_cannot_approve_own_order(self):
         order = self.client.post(
             "/api/purchase-orders",
