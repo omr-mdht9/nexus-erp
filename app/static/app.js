@@ -188,3 +188,6 @@ accounting=async function(c){await renderJournalExport(c);if(!currentUser||!['ad
 
 const renderInvoiceRegisterExport=invoices;
 invoices=async function(c,type){await renderInvoiceRegisterExport(c,type);if(type!=='purchasing'&&type!=='sales')return;if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;const card=c.querySelector('.page .card'),button=document.createElement('button');button.textContent='Export CSV';button.onclick=()=>window.exportTableCsv(card.querySelector('table'),type==='purchasing'?'nexus-purchase-invoices.csv':'nexus-sales-invoices.csv');card.querySelector('h3').appendChild(button)};
+
+const renderInvoiceCreatorColumn=invoices;
+invoices=async function(c,type){await renderInvoiceCreatorColumn(c,type);if(type!=='purchasing'&&type!=='sales')return;const kind=type==='purchasing'?'purchase':'sale',all=await api('/api/invoices'),rows=(invoiceStatusFilter==='all'?all:all.filter(x=>x.status===invoiceStatusFilter)).filter(x=>x.kind===kind),table=c.querySelector('.page .card table');table.querySelector('tr').innerHTML+='<th>Created By</th>';rows.forEach((invoice,i)=>{const cell=document.createElement('td');cell.textContent=invoice.created_by||'-';table.querySelectorAll('tr')[i+1].appendChild(cell)})};
