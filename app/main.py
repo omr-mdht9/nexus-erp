@@ -197,6 +197,13 @@ def move(s,pid,wid,qty,direction,ref_type,ref_no):
 def sales_quotations(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     return [{'id':q.id,'quote_no':q.quote_no,'customer':s.get(Party,q.customer_id).name,'status':q.status,'total':q.total,'created_at':q.created_at.isoformat()} for q in s.query(SalesQuotation).order_by(SalesQuotation.id.desc()).limit(100)]
 
+@app.get('/api/sales-quotations/{quote_id}')
+def sales_quotation_detail(quote_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    q=s.get(SalesQuotation,quote_id)
+    if not q: raise HTTPException(404,'Sales quotation not found')
+    lines=s.query(SalesQuotationLine).filter_by(quotation_id=q.id).all()
+    return {'id':q.id,'quote_no':q.quote_no,'customer':s.get(Party,q.customer_id).name,'status':q.status,'total':q.total,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':round(line.qty*line.unit_price,2)} for line in lines]}
+
 @app.post('/api/sales-quotations')
 def create_sales_quotation(x:SalesQuotationIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     customer=s.get(Party,x.customer_id)
@@ -226,6 +233,13 @@ def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=
 @app.get('/api/purchase-orders')
 def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     return [{'id':p.id,'po_no':p.po_no,'supplier':s.get(Party,p.supplier_id).name,'status':p.status,'total':p.total,'created_at':p.created_at.isoformat()} for p in s.query(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(100)]
+
+@app.get('/api/purchase-orders/{po_id}')
+def purchase_order_detail(po_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    po=s.get(PurchaseOrder,po_id)
+    if not po: raise HTTPException(404,'Purchase order not found')
+    lines=s.query(PurchaseOrderLine).filter_by(purchase_order_id=po.id).all()
+    return {'id':po.id,'po_no':po.po_no,'supplier':s.get(Party,po.supplier_id).name,'status':po.status,'total':po.total,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':round(line.qty*line.unit_price,2)} for line in lines]}
 
 @app.post('/api/purchase-orders')
 def create_purchase_order(x:PurchaseOrderIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
