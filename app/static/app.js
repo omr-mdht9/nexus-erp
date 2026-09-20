@@ -185,3 +185,6 @@ accounting=async function(c){await renderTrialBalanceExport(c);if(!currentUser||
 
 const renderJournalExport=accounting;
 accounting=async function(c){await renderJournalExport(c);if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;const card=[...c.querySelectorAll('.card')].find(x=>x.querySelector('h3')?.textContent==='Journal Entries');if(!card)return;const button=document.createElement('button');button.textContent='Export CSV';button.onclick=()=>window.exportTableCsv(card.querySelector('table'),'nexus-journal-entries.csv');card.querySelector('h3').appendChild(button)};
+
+const renderInvoiceRegisterExport=invoices;
+invoices=async function(c,type){await renderInvoiceRegisterExport(c,type);if(type!=='purchasing'&&type!=='sales')return;if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;const card=c.querySelector('.page .card'),button=document.createElement('button');button.textContent='Export CSV';button.onclick=()=>window.exportTableCsv(card.querySelector('table'),type==='purchasing'?'nexus-purchase-invoices.csv':'nexus-sales-invoices.csv');card.querySelector('h3').appendChild(button)};
