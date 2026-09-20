@@ -213,3 +213,17 @@ users=async function(c){await renderUserAccessExport(c);if(!currentUser||current
 
 const renderCommercialCreator=invoices;
 invoices=async function(c,type){await renderCommercialCreator(c,type);if(type!=='purchasing'&&type!=='sales')return;if(!currentUser||!['admin','accountant'].includes(currentUser.role))return;const rows=await api(type==='purchasing'?'/api/purchase-orders':'/api/sales-quotations');const card=c.querySelectorAll('.card')[c.querySelectorAll('.card').length-1];const table=card.querySelector('table');if(!table||table.dataset.creatorColumn)return;table.dataset.creatorColumn='true';table.querySelector('tr').insertCell(-1).outerHTML='<th>Created By</th>';rows.forEach((row,i)=>{const cell=table.querySelectorAll('tr')[i+1].insertCell(-1);cell.textContent=row.created_by||'—'})};
+
+
+window.newStockTransfer=async function(){
+  const [products,warehouses]=await Promise.all([api('/api/products'),api('/api/warehouses')]);
+  if(warehouses.length<2){alert('Create at least two warehouses before transferring stock.');return}
+  const options=warehouses.map(w=>'<option value="'+w.id+'">'+esc(w.code)+' - '+esc(w.name)+'</option>').join('');
+  const productOptions=products.map(p=>'<option value="'+p.id+'">'+esc(p.sku)+' - '+esc(p.name)+' (on hand: '+p.qty+')</option>').join('');
+  const m=modal('<div class="card"><div class="modal-head"><h2>New Stock Transfer</h2><button class="x">×</button></div><div class="muted">Moves stock between warehouses. This does not create a financial transaction.</div><form id="transferForm"><label>Product</label><select name="product_id">'+productOptions+'</select><label>From warehouse</label><select name="from_warehouse_id">'+options+'</select><label>To warehouse</label><select name="to_warehouse_id">'+options+'</select><label>Quantity</label><input name="qty" type="number" min="0.0001" step="0.0001" required><button class="primary">Transfer Stock</button><div id="err"></div></form></div>');
+  m.querySelector('.x').onclick=()=>m.remove();
+  m.querySelector('#transferForm').onsubmit=async e=>{e.preventDefault();const body={product_id:+e.target.product_id.value,from_warehouse_id:+e.target.from_warehouse_id.value,to_warehouse_id:+e.target.to_warehouse_id.value,qty:+e.target.qty.value};try{const result=await api('/api/stock-transfers',{method:'POST',body:JSON.stringify(body)});m.remove();alert('Transfer '+result.reference+' completed.');render()}catch(err){m.querySelector('#err').textContent=err.message}};
+};
+
+const renderStockTransferButton=inventory;
+inventory=async function(c){await renderStockTransferButton(c);if(!currentUser||!['admin','inventory'].includes(currentUser.role))return;const hero=c.querySelector('.hero');const button=document.createElement('button');button.className='primary';button.textContent='Transfer Stock';button.onclick=window.newStockTransfer;hero.appendChild(button)};
