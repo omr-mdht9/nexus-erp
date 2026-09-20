@@ -126,6 +126,48 @@ class SafetyWorkflowTests(unittest.TestCase):
             403,
         )
 
+    def test_stock_transfer_creates_balanced_movement_pair(self):
+        warehouse = self.client.post(
+            "/api/warehouses",
+            json={"code": "WH-02", "name": "Transfer Destination"},
+            headers=self.headers,
+        )
+        warehouse.raise_for_status()
+        destination_id = warehouse.json()["id"]
+
+        receipt = self.client.post(
+            "/api/invoices",
+            json={
+                "kind": "purchase",
+                "party_id": 1,
+                "warehouse_id": 1,
+                "lines": [{"product_id": 1, "qty": 5, "unit_price": 10}],
+                "post_now": True,
+            },
+            headers=self.headers,
+        )
+        receipt.raise_for_status()
+
+        transfer = self.client.post(
+            "/api/stock-transfers",
+            json={
+                "product_id": 1,
+                "from_warehouse_id": 1,
+                "to_warehouse_id": destination_id,
+                "qty": 2,
+            },
+            headers=self.headers,
+        )
+        transfer.raise_for_status()
+        reference = transfer.json()["reference"]
+
+        movements = self.client.get("/api/stock-moves", headers=self.headers)
+        movements.raise_for_status()
+        related = [m for m in movements.json() if m["ref_no"] == reference]
+        self.assertEqual(len(related), 2)
+        self.assertEqual({m["direction"] for m in related}, {"IN", "OUT"})
+        self.assertEqual(sum(m["qty"] for m in related), 4)
+
     def test_purchase_order_creator_cannot_approve_own_order(self):
         order = self.client.post(
             "/api/purchase-orders",
