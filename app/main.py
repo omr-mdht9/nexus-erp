@@ -420,7 +420,8 @@ def invoices(_:User=Depends(current_user),s:Session=Depends(db)):
     out=[]
     for i in s.query(Invoice).order_by(Invoice.id.desc()).limit(100):
         p=s.get(Party,i.party_id); source=quote_sources.get(i.id) or po_sources.get(i.id) or ''
-        out.append({'id':i.id,'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'source_document':source,'created_at':i.created_at.isoformat()})
+        creation=s.query(AuditLog).filter_by(entity_type='invoice',entity_id=i.id,action='create').order_by(AuditLog.id.asc()).first(); creator=s.get(User,creation.actor_id).username if creation and s.get(User,creation.actor_id) else ''
+        out.append({'id':i.id,'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'source_document':source,'created_by':creator,'created_at':i.created_at.isoformat()})
     return out
 
 @app.get('/api/invoices/{invoice_id}')
