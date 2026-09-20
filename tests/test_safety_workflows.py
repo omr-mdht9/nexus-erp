@@ -168,6 +168,29 @@ class SafetyWorkflowTests(unittest.TestCase):
         self.assertEqual({m["direction"] for m in related}, {"IN", "OUT"})
         self.assertEqual(sum(m["qty"] for m in related), 4)
 
+    def test_stock_adjustment_requires_reason_and_is_traceable(self):
+        invalid = self.client.post(
+            "/api/stock-adjustments",
+            json={"product_id": 1, "warehouse_id": 1, "direction": "SIDEWAYS", "qty": 1, "reason": "Cycle count correction"},
+            headers=self.headers,
+        )
+        self.assertEqual(invalid.status_code, 400)
+
+        adjustment = self.client.post(
+            "/api/stock-adjustments",
+            json={"product_id": 1, "warehouse_id": 1, "direction": "IN", "qty": 1, "reason": "Cycle count correction"},
+            headers=self.headers,
+        )
+        adjustment.raise_for_status()
+        reference = adjustment.json()["reference"]
+
+        movements = self.client.get("/api/stock-moves", headers=self.headers)
+        movements.raise_for_status()
+        related = [m for m in movements.json() if m["ref_no"] == reference]
+        self.assertEqual(len(related), 1)
+        self.assertEqual(related[0]["direction"], "IN")
+        self.assertEqual(related[0]["ref_type"], "adjustment")
+
     def test_purchase_order_creator_cannot_approve_own_order(self):
         order = self.client.post(
             "/api/purchase-orders",
