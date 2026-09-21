@@ -57,16 +57,22 @@ class SalesQuotation(Base):
     __tablename__='sales_quotations'; id=Column(Integer,primary_key=True); quote_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class PurchaseOrder(Base):
     __tablename__='purchase_orders'; id=Column(Integer,primary_key=True); po_no=Column(String(50),unique=True,nullable=False); supplier_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+class SalesOrder(Base):
+    __tablename__='sales_orders'; id=Column(Integer,primary_key=True); order_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesQuotationLine(Base):
     __tablename__='sales_quotation_lines'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
 class PurchaseOrderLine(Base):
     __tablename__='purchase_order_lines'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
+class SalesOrderLine(Base):
+    __tablename__='sales_order_lines'; id=Column(Integer,primary_key=True); sales_order_id=Column(Integer,ForeignKey('sales_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
 class PurchaseReceipt(Base):
     __tablename__='purchase_receipts'; id=Column(Integer,primary_key=True); receipt_no=Column(String(50),unique=True,nullable=False); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),unique=True,nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); status=Column(String(20),default='posted'); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesQuotationConversion(Base):
     __tablename__='sales_quotation_conversions'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),unique=True,nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),unique=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class PurchaseOrderConversion(Base):
     __tablename__='purchase_order_conversions'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),unique=True,nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),unique=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
+class SalesOrderConversion(Base):
+    __tablename__='sales_order_conversions'; id=Column(Integer,primary_key=True); sales_order_id=Column(Integer,ForeignKey('sales_orders.id'),unique=True,nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),unique=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class Payment(Base):
     __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Float,nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class PaymentAllocation(Base):
@@ -140,6 +146,8 @@ class SalesQuotationWorkflowIn(BaseModel): action:str
 class PurchaseOrderIn(BaseModel): supplier_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
 class PurchaseOrderWorkflowIn(BaseModel): action:str
 class PurchaseReceiptIn(BaseModel): purchase_order_id:int; warehouse_id:int
+class SalesOrderIn(BaseModel): customer_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
+class SalesOrderWorkflowIn(BaseModel): action:str
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
 class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
 
@@ -245,6 +253,49 @@ def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=
     if x.action=='approve' and creator and creator.actor_id==actor.id: raise HTTPException(403,'Quotation creator cannot approve the same quotation')
     q.status=target;audit(s,actor,'workflow_'+x.action,'sales_quotation',q.id,f'{q.quote_no}; status {target}');s.commit()
     return {'id':q.id,'quote_no':q.quote_no,'status':q.status}
+
+@app.get('/api/sales-orders')
+def sales_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    def creator_for(order):
+        entry=s.query(AuditLog).filter_by(entity_type='sales_order',entity_id=order.id,action='create').order_by(AuditLog.id.asc()).first()
+        user=s.get(User,entry.actor_id) if entry else None
+        return user.username if user else '—'
+    return [{'id':order.id,'order_no':order.order_no,'customer':s.get(Party,order.customer_id).name,'status':order.status,'total':order.total,'created_at':order.created_at.isoformat(),'created_by':creator_for(order)} for order in s.query(SalesOrder).order_by(SalesOrder.id.desc()).limit(100)]
+
+@app.get('/api/sales-orders/{order_id}')
+def sales_order_detail(order_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    order=s.get(SalesOrder,order_id)
+    if not order: raise HTTPException(404,'Sales order not found')
+    lines=s.query(SalesOrderLine).filter_by(sales_order_id=order.id).all()
+    return {'id':order.id,'order_no':order.order_no,'customer':s.get(Party,order.customer_id).name,'status':order.status,'total':order.total,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':round(line.qty*line.unit_price,2)} for line in lines]}
+
+@app.post('/api/sales-orders')
+def create_sales_order(x:SalesOrderIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    customer=s.get(Party,x.customer_id)
+    if not customer or customer.kind!='customer': raise HTTPException(400,'Invalid customer')
+    total=x.total
+    if x.lines:
+        total=0
+        for line in x.lines:
+            if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on sales order')
+            total+=line.qty*line.unit_price
+    if not total or total<=0: raise HTTPException(400,'Sales order total or line items are required')
+    no='SO-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];order=SalesOrder(order_no=no,customer_id=customer.id,total=total);s.add(order);s.flush()
+    for line in x.lines: s.add(SalesOrderLine(sales_order_id=order.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price))
+    audit(s,actor,'create','sales_order',order.id,no);s.commit()
+    return {'id':order.id,'order_no':no,'status':order.status,'total':order.total,'line_count':len(x.lines)}
+
+@app.post('/api/sales-orders/{order_id}/workflow')
+def sales_order_workflow(order_id:int,x:SalesOrderWorkflowIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    order=s.get(SalesOrder,order_id)
+    if not order: raise HTTPException(404,'Sales order not found')
+    transitions={('draft','submit'):'submitted',('submitted','approve'):'approved',('draft','cancel'):'cancelled',('submitted','cancel'):'cancelled'}
+    target=transitions.get((order.status,x.action))
+    if not target: raise HTTPException(400,'Invalid sales order workflow action')
+    creator=s.query(AuditLog).filter_by(entity_type='sales_order',entity_id=order.id,action='create').order_by(AuditLog.id.asc()).first()
+    if x.action=='approve' and creator and creator.actor_id==actor.id: raise HTTPException(403,'Sales order creator cannot approve the same sales order')
+    order.status=target;audit(s,actor,'workflow_'+x.action,'sales_order',order.id,f'{order.order_no}; status {target}');s.commit()
+    return {'id':order.id,'order_no':order.order_no,'status':order.status}
 
 @app.get('/api/purchase-orders')
 def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -486,9 +537,10 @@ def post_approved_invoice(invoice_id:int,actor:User=Depends(require_roles('admin
 def invoices(_:User=Depends(current_user),s:Session=Depends(db)):
     quote_sources={c.invoice_id:s.get(SalesQuotation,c.quotation_id).quote_no for c in s.query(SalesQuotationConversion).all()}
     po_sources={c.invoice_id:s.get(PurchaseOrder,c.purchase_order_id).po_no for c in s.query(PurchaseOrderConversion).all()}
+    order_sources={c.invoice_id:s.get(SalesOrder,c.sales_order_id).order_no for c in s.query(SalesOrderConversion).all()}
     out=[]
     for i in s.query(Invoice).order_by(Invoice.id.desc()).limit(100):
-        p=s.get(Party,i.party_id); source=quote_sources.get(i.id) or po_sources.get(i.id) or ''
+        p=s.get(Party,i.party_id); source=quote_sources.get(i.id) or po_sources.get(i.id) or order_sources.get(i.id) or ''
         creation=s.query(AuditLog).filter_by(entity_type='invoice',entity_id=i.id,action='create').order_by(AuditLog.id.asc()).first(); creator=s.get(User,creation.actor_id).username if creation and s.get(User,creation.actor_id) else ''
         out.append({'id':i.id,'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'source_document':source,'created_by':creator,'created_at':i.created_at.isoformat()})
     return out
@@ -747,6 +799,21 @@ def convert_sales_quotation(quote_id:int,x:QuotationConvertIn,actor:User=Depends
     no='S-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; invoice=Invoice(invoice_no=no,kind='sale',party_id=q.customer_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
     for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
     s.add(SalesQuotationConversion(quotation_id=q.id,invoice_id=invoice.id));audit(s,actor,'convert','sales_quotation',q.id,f'{q.quote_no} to draft {no}');s.commit()
+    return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
+
+
+@app.post('/api/sales-orders/{order_id}/convert')
+def convert_sales_order(order_id:int,x:QuotationConvertIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    order=s.get(SalesOrder,order_id)
+    if not order or order.status!='approved': raise HTTPException(400,'Only approved sales orders can be converted')
+    if s.query(SalesOrderConversion).filter_by(sales_order_id=order.id).first(): raise HTTPException(400,'Sales order has already been converted')
+    if not s.get(Warehouse,x.warehouse_id): raise HTTPException(400,'Invalid warehouse')
+    lines=s.query(SalesOrderLine).filter_by(sales_order_id=order.id).all()
+    if not lines: raise HTTPException(400,'Sales order requires product lines before conversion')
+    subtotal=round(sum(line.qty*line.unit_price for line in lines),2); tax_amount=round(subtotal*x.tax_rate/100,2); total=round(subtotal+tax_amount,2)
+    no='S-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; invoice=Invoice(invoice_no=no,kind='sale',party_id=order.customer_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
+    for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
+    s.add(SalesOrderConversion(sales_order_id=order.id,invoice_id=invoice.id));audit(s,actor,'convert','sales_order',order.id,f'{order.order_no} to draft {no}');s.commit()
     return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
 
 
