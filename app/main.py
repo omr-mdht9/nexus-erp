@@ -380,7 +380,8 @@ def stock_adjustments(_:User=Depends(require_roles('admin','inventory')),s:Sessi
     for row in rows:
         parts=row.detail.split('; ')
         if len(parts)<6: continue
-        out.append({'reference':parts[0],'product':parts[1],'warehouse':parts[2],'direction':parts[3],'qty':parts[4].replace('qty ',''),'reason':parts[5],'created_at':row.created_at.isoformat()})
+        actor=s.get(User,row.actor_id)
+        out.append({'reference':parts[0],'product':parts[1],'warehouse':parts[2],'direction':parts[3],'qty':parts[4].replace('qty ',''),'reason':parts[5],'recorded_by':actor.username if actor else 'Unknown','created_at':row.created_at.isoformat()})
     return out
 
 @app.post('/api/stock-adjustments')
