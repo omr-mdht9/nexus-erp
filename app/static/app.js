@@ -253,3 +253,61 @@ inventory=async function(c){await renderWarehouseStockRegister(c);if(!currentUse
 
 const renderStockTransferRegister=inventory;
 inventory=async function(c){await renderStockTransferRegister(c);if(!currentUser||!['admin','inventory'].includes(currentUser.role))return;const rows=await api('/api/stock-transfers');const page=c.querySelector('.page');const card=document.createElement('div');card.className='card';card.style.marginTop='16px';card.innerHTML='<h3>Recent Warehouse Transfers</h3><div class="muted">Audited transfers, including their reason and recorder.</div><table class="table"><tr><th>Date</th><th>Item</th><th>From</th><th>To</th><th>Qty</th><th>Reason</th><th>Recorded by</th><th>Reference</th></tr>'+rows.map(x=>'<tr><td>'+new Date(x.created_at).toLocaleString()+'</td><td>'+esc(x.product)+'</td><td>'+esc(x.from_warehouse)+'</td><td>'+esc(x.to_warehouse)+'</td><td>'+esc(x.qty)+'</td><td>'+esc(x.reason)+'</td><td>'+esc(x.recorded_by)+'</td><td>'+esc(x.reference)+'</td></tr>').join('')+'</table>';page.appendChild(card)};
+
+
+window.receivePurchaseOrder=async function(id){
+  const warehouses=await api('/api/warehouses');
+  const m=modal('<div class="card"><div class="modal-head"><h2>Receive Purchase Order</h2><button class="x">×</button></div><form id="receiptForm"><p class="muted">This records goods into stock. It does not create a supplier invoice.</p><select name="warehouse_id">'+warehouses.map(w=>'<option value="'+w.id+'">'+esc(w.code)+' - '+esc(w.name)+'</option>').join('')+'</select><button class="primary">Confirm Receipt</button><div id="err"></div></form></div>');
+  m.querySelector('#receiptForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/purchase-receipts',{method:'POST',body:JSON.stringify({purchase_order_id:id,warehouse_id:+e.target.warehouse_id.value})});m.remove();render()}catch(err){m.querySelector('#err').textContent=err.message}};
+};
+
+window.newSalesOrder=async function(){
+  const [parties,products]=await Promise.all([api('/api/parties'),api('/api/products')]);
+  const customers=parties.filter(p=>p.kind==='customer');
+  const m=modal('<div class="card"><div class="modal-head"><h2>New Sales Order</h2><button class="x">×</button></div><form id="salesOrderForm"><select name="customer_id">'+customers.map(p=>'<option value="'+p.id+'">'+esc(p.code)+' - '+esc(p.name)+'</option>').join('')+'</select><select name="product_id">'+products.map(p=>'<option value="'+p.id+'" data-price="'+p.sale_price+'">'+esc(p.sku)+' - '+esc(p.name)+'</option>').join('')+'</select><input name="qty" type="number" min="0.01" step="0.01" value="1" required><input name="unit_price" type="number" min="0" step="0.01" placeholder="Unit price" required><button class="primary">Create Draft Sales Order</button><div id="err"></div></form></div>');
+  const form=m.querySelector('#salesOrderForm'); const product=form.product_id;
+  form.unit_price.value=product.selectedOptions[0]?.dataset.price||0;
+  product.onchange=()=>form.unit_price.value=product.selectedOptions[0]?.dataset.price||0;
+  form.onsubmit=async e=>{e.preventDefault();try{await api('/api/sales-orders',{method:'POST',body:JSON.stringify({customer_id:+e.target.customer_id.value,lines:[{product_id:+e.target.product_id.value,qty:+e.target.qty.value,unit_price:+e.target.unit_price.value}]})});m.remove();render()}catch(err){m.querySelector('#err').textContent=err.message}};
+};
+
+window.salesOrderAction=async function(id,action){try{await api('/api/sales-orders/'+id+'/workflow',{method:'POST',body:JSON.stringify({action})});render()}catch(err){alert(err.message)}};
+
+window.deliverSalesOrder=async function(id){
+  const warehouses=await api('/api/warehouses');
+  const m=modal('<div class="card"><div class="modal-head"><h2>Deliver Sales Order</h2><button class="x">×</button></div><form id="deliveryForm"><p class="muted">This confirms goods leaving stock. The related invoice remains a separate review step.</p><select name="warehouse_id">'+warehouses.map(w=>'<option value="'+w.id+'">'+esc(w.code)+' - '+esc(w.name)+'</option>').join('')+'</select><button class="primary">Confirm Delivery</button><div id="err"></div></form></div>');
+  m.querySelector('#deliveryForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/sales-deliveries',{method:'POST',body:JSON.stringify({sales_order_id:id,warehouse_id:+e.target.warehouse_id.value})});m.remove();render()}catch(err){m.querySelector('#err').textContent=err.message}};
+};
+
+window.convertSalesOrder=async function(id){
+  const warehouses=await api('/api/warehouses');
+  const m=modal('<div class="card"><div class="modal-head"><h2>Create Draft Invoice</h2><button class="x">×</button></div><form id="convertOrderForm"><p class="muted">A draft invoice will be created. It must still be reviewed and posted separately.</p><select name="warehouse_id">'+warehouses.map(w=>'<option value="'+w.id+'">'+esc(w.code)+' - '+esc(w.name)+'</option>').join('')+'</select><button class="primary">Create Draft Invoice</button><div id="err"></div></form></div>');
+  m.querySelector('#convertOrderForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/sales-orders/'+id+'/convert',{method:'POST',body:JSON.stringify({warehouse_id:+e.target.warehouse_id.value})});m.remove();render()}catch(err){m.querySelector('#err').textContent=err.message}};
+};
+
+const renderControlledCommercialWorkflows=invoices;
+invoices=async function(c,type){
+  await renderControlledCommercialWorkflows(c,type);
+  if(!currentUser)return;
+  const finance=['admin','accountant'].includes(currentUser.role);
+  const inventoryRole=['admin','inventory'].includes(currentUser.role);
+  if(type==='purchasing'&&inventoryRole){
+    const [orders,receipts]=await Promise.all([api('/api/purchase-orders'),api('/api/purchase-receipts')]);
+    const available=orders.filter(o=>o.status==='approved');
+    const card=document.createElement('div');card.className='card';card.style.marginTop='16px';
+    card.innerHTML='<h3>Goods Receipts</h3><div class="muted">Receive approved purchase orders into warehouse stock. Supplier invoice posting stays separate.</div>'+(available.length?'<table class="table"><tr><th>Approved PO</th><th>Supplier</th><th>Total</th><th>Action</th></tr>'+available.map(o=>'<tr><td><b>'+esc(o.po_no)+'</b></td><td>'+esc(o.supplier)+'</td><td>'+money(o.total)+'</td><td><button class="primary" data-receive="'+o.id+'">Receive</button></td></tr>').join('')+'</table>':'<p class="muted">No approved purchase orders are awaiting receipt.</p>')+'<h4>Recent Receipts</h4>'+(receipts.length?'<table class="table"><tr><th>Receipt</th><th>PO</th><th>Supplier</th><th>Warehouse</th><th>Status</th></tr>'+receipts.map(r=>'<tr><td><b>'+esc(r.receipt_no)+'</b></td><td>'+esc(r.po_no)+'</td><td>'+esc(r.supplier)+'</td><td>'+esc(r.warehouse)+'</td><td>'+esc(r.status)+'</td></tr>').join('')+'</table>':'<p class="muted">No goods receipts recorded yet.</p>');
+    card.querySelectorAll('[data-receive]').forEach(b=>b.onclick=()=>window.receivePurchaseOrder(+b.dataset.receive));
+    c.querySelector('.page').appendChild(card);
+  }
+  if(type==='sales'){
+    const orders=await api('/api/sales-orders');
+    const deliveries=inventoryRole?await api('/api/sales-deliveries'):[];
+    const card=document.createElement('div');card.className='card';card.style.marginTop='16px';
+    card.innerHTML='<h3>Sales Orders</h3><div class="muted">Approved orders must be delivered before a draft invoice can be created.</div>'+(finance?'<button class="primary" id="newSalesOrder">+ New Sales Order</button>':'')+'<table class="table"><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th><th>Action</th></tr>'+orders.map(o=>{let actions='-';if(finance&&o.status==='draft')actions='<button data-order-action="submit" data-order="'+o.id+'">Submit</button>';else if(finance&&o.status==='submitted')actions='<button class="primary" data-order-action="approve" data-order="'+o.id+'">Approve</button>';else if(inventoryRole&&o.status==='approved')actions='<button class="primary" data-deliver="'+o.id+'">Deliver</button>';else if(finance&&o.status==='delivered')actions='<button class="primary" data-convert="'+o.id+'">Create Draft Invoice</button>';return '<tr><td><b>'+esc(o.order_no)+'</b></td><td>'+esc(o.customer)+'</td><td>'+money(o.total)+'</td><td><span class="badge '+(o.status==='approved'||o.status==='delivered'?'in':'')+'">'+esc(o.status)+'</span></td><td>'+actions+'</td></tr>'}).join('')+'</table>'+(inventoryRole?'<h4>Recent Deliveries</h4>'+(deliveries.length?'<table class="table"><tr><th>Delivery</th><th>Sales Order</th><th>Customer</th><th>Warehouse</th><th>Status</th></tr>'+deliveries.map(d=>'<tr><td><b>'+esc(d.delivery_no)+'</b></td><td>'+esc(d.order_no)+'</td><td>'+esc(d.customer)+'</td><td>'+esc(d.warehouse)+'</td><td>'+esc(d.status)+'</td></tr>').join('')+'</table>':'<p class="muted">No deliveries recorded yet.</p>'):'');
+    card.querySelector('#newSalesOrder')?.addEventListener('click',window.newSalesOrder);
+    card.querySelectorAll('[data-order-action]').forEach(b=>b.onclick=()=>window.salesOrderAction(+b.dataset.order,b.dataset.orderAction));
+    card.querySelectorAll('[data-deliver]').forEach(b=>b.onclick=()=>window.deliverSalesOrder(+b.dataset.deliver));
+    card.querySelectorAll('[data-convert]').forEach(b=>b.onclick=()=>window.convertSalesOrder(+b.dataset.convert));
+    c.querySelector('.page').appendChild(card);
+  }
+};
