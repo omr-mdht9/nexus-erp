@@ -155,11 +155,13 @@ class SafetyWorkflowTests(unittest.TestCase):
                 "from_warehouse_id": 1,
                 "to_warehouse_id": destination_id,
                 "qty": 2,
+                "reason": "Move stock for operational use",
             },
             headers=self.headers,
         )
         transfer.raise_for_status()
         reference = transfer.json()["reference"]
+        self.assertEqual(transfer.json()["reason"], "Move stock for operational use")
 
         movements = self.client.get("/api/stock-moves", headers=self.headers)
         movements.raise_for_status()
