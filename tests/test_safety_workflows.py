@@ -229,6 +229,7 @@ class SafetyWorkflowTests(unittest.TestCase):
         register.raise_for_status()
         record = next(x for x in register.json() if x["reference"] == reference)
         self.assertEqual(record["reason"], "Cycle count correction")
+        self.assertEqual(record["recorded_by"], "testadmin")
 
     def test_purchase_order_creator_cannot_approve_own_order(self):
         order = self.client.post(
