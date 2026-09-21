@@ -258,7 +258,7 @@ def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=
     return {'id':q.id,'quote_no':q.quote_no,'status':q.status}
 
 @app.get('/api/sales-orders')
-def sales_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+def sales_orders(_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     def creator_for(order):
         entry=s.query(AuditLog).filter_by(entity_type='sales_order',entity_id=order.id,action='create').order_by(AuditLog.id.asc()).first()
         user=s.get(User,entry.actor_id) if entry else None
@@ -266,7 +266,7 @@ def sales_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=D
     return [{'id':order.id,'order_no':order.order_no,'customer':s.get(Party,order.customer_id).name,'status':order.status,'total':order.total,'created_at':order.created_at.isoformat(),'created_by':creator_for(order)} for order in s.query(SalesOrder).order_by(SalesOrder.id.desc()).limit(100)]
 
 @app.get('/api/sales-orders/{order_id}')
-def sales_order_detail(order_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+def sales_order_detail(order_id:int,_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     order=s.get(SalesOrder,order_id)
     if not order: raise HTTPException(404,'Sales order not found')
     lines=s.query(SalesOrderLine).filter_by(sales_order_id=order.id).all()
@@ -326,7 +326,7 @@ def create_sales_delivery(x:SalesDeliveryIn,actor:User=Depends(require_roles('ad
     s.commit(); return {'delivery_no':no,'sales_order_id':order.id,'warehouse_id':warehouse.id,'status':'posted'}
 
 @app.get('/api/purchase-orders')
-def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+def purchase_orders(_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     def creator_for(po):
         entry=s.query(AuditLog).filter_by(entity_type='purchase_order',entity_id=po.id,action='create').order_by(AuditLog.id.asc()).first()
         user=s.get(User,entry.actor_id) if entry else None
@@ -334,7 +334,7 @@ def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Sessio
     return [{'id':p.id,'po_no':p.po_no,'supplier':s.get(Party,p.supplier_id).name,'status':p.status,'total':p.total,'created_at':p.created_at.isoformat(),'created_by':creator_for(p)} for p in s.query(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(100)]
 
 @app.get('/api/purchase-orders/{po_id}')
-def purchase_order_detail(po_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+def purchase_order_detail(po_id:int,_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     po=s.get(PurchaseOrder,po_id)
     if not po: raise HTTPException(404,'Purchase order not found')
     lines=s.query(PurchaseOrderLine).filter_by(purchase_order_id=po.id).all()
