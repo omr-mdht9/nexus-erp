@@ -502,6 +502,38 @@ class SafetyWorkflowTests(unittest.TestCase):
         )
         converted.raise_for_status()
         self.assertEqual(converted.json()["status"], "draft")
+        invoice_id = converted.json()["invoice_id"]
+        self.assertEqual(
+            self.client.post(
+                f"/api/invoices/{invoice_id}/workflow",
+                json={"action": "submit"},
+                headers=reviewer_headers,
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/invoices/{invoice_id}/workflow",
+                json={"action": "approve"},
+                headers=self.headers,
+            ).status_code,
+            200,
+        )
+        poster = self.client.post(
+            "/api/users",
+            json={"username": "deliveryinvoiceposter", "password": "ReviewerTest1!", "role": "accountant"},
+            headers=self.headers,
+        )
+        poster.raise_for_status()
+        poster_login = self.client.post(
+            "/api/auth/login",
+            data={"username": "deliveryinvoiceposter", "password": "ReviewerTest1!"},
+        )
+        poster_login.raise_for_status()
+        poster_headers = {"Authorization": f"Bearer {poster_login.json()['access_token']}"}
+        posted = self.client.post(f"/api/invoices/{invoice_id}/post", headers=poster_headers)
+        posted.raise_for_status()
+        self.assertEqual(posted.json()["status"], "posted")
         duplicate = self.client.post(
             f"/api/sales-orders/{order_id}/convert",
             json={"warehouse_id": 1},
