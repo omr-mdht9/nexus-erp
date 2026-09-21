@@ -263,7 +263,11 @@ class SafetyWorkflowTests(unittest.TestCase):
             headers=headers,
         )
         transfer.raise_for_status()
-        self.assertEqual(transfer.json()["status"], "posted")
+        reference = transfer.json()["reference"]
+        self.assertTrue(reference.startswith("TRF-"))
+        register = self.client.get("/api/stock-transfers", headers=headers)
+        register.raise_for_status()
+        self.assertTrue(any(row["reference"] == reference for row in register.json()))
 
     def test_accountant_cannot_adjust_stock(self):
         user = self.client.post(
