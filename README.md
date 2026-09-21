@@ -35,3 +35,17 @@ Alternatively, after creating `.env`, run `docker compose up --build`.
 
 ## Important production note
 This is still a development foundation. Before using it for statutory accounting or live company transactions, we need to complete approvals, fiscal periods, document numbering rules, returns, payments allocation, landed cost, purchase/sales workflow, audit logs, backups, PostgreSQL migration, user permissions, and Egyptian e-invoicing/tax integration.
+
+
+## Build-stage permission matrix
+
+| Activity | Admin | Accountant | Inventory |
+|---|---:|---:|---:|
+| Manage users and roles | Yes | No | No |
+| Create products, warehouses, BOMs, production, transfers, and stock adjustments | Yes | No | Yes |
+| Create/approve financial and commercial documents | Yes, with independent-approval rules | Yes, with independent-approval rules | No |
+| View financial reports and reconciliation | Yes | Yes | No |
+| Review transfer and adjustment history | Yes | No | Yes |
+| View audit logs and system checks | Yes | No | No |
+
+Stock cannot go below zero. Transfers and adjustments require a reason and are retained in audit history. A document creator cannot approve their own quotation, purchase order, or invoice, and cannot post their own invoice.
