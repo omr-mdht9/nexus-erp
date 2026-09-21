@@ -201,6 +201,24 @@ class SafetyWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_inventory_role_cannot_access_admin_audit_log(self):
+        user = self.client.post(
+            "/api/users",
+            json={"username": "inventoryaudit", "password": "InventoryTest1!", "role": "inventory"},
+            headers=self.headers,
+        )
+        user.raise_for_status()
+        login = self.client.post(
+            "/api/auth/login",
+            data={"username": "inventoryaudit", "password": "InventoryTest1!"},
+        )
+        login.raise_for_status()
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        self.assertEqual(
+            self.client.get("/api/audit-logs", headers=headers).status_code,
+            403,
+        )
+
     def test_accountant_cannot_adjust_stock(self):
         user = self.client.post(
             "/api/users",
