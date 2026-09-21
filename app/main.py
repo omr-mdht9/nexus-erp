@@ -353,6 +353,11 @@ def add_wh(x:WarehouseIn,actor:User=Depends(require_roles('admin','inventory')),
     audit(s,actor,'create','warehouse',w.id,f'Code {w.code}')
     s.commit(); return {'id':w.id}
 
+@app.get('/api/stock-by-warehouse')
+def stock_by_warehouse(_:User=Depends(current_user),s:Session=Depends(db)):
+    rows=s.query(Stock).order_by(Stock.warehouse_id,Stock.product_id).all()
+    return [{'product_id':row.product_id,'sku':s.get(Product,row.product_id).sku,'product':s.get(Product,row.product_id).name,'warehouse_id':row.warehouse_id,'warehouse':s.get(Warehouse,row.warehouse_id).name,'warehouse_code':s.get(Warehouse,row.warehouse_id).code,'qty':row.qty} for row in rows]
+
 @app.get('/api/stock-moves')
 def moves(_:User=Depends(current_user),s:Session=Depends(db)):
     rows=s.query(StockMove).order_by(StockMove.id.desc()).limit(150).all(); out=[]
