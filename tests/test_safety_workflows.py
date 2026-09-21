@@ -417,7 +417,13 @@ class SafetyWorkflowTests(unittest.TestCase):
         self.assertEqual(record["reason"], "Cycle count correction")
         self.assertEqual(record["recorded_by"], "testadmin")
 
-    def test_sales_order_requires_independent_approval_and_converts_to_draft(self):
+    def test_sales_order_requires_delivery_before_draft_invoice(self):
+        stocked = self.client.post(
+            "/api/stock-adjustments",
+            json={"product_id": 1, "warehouse_id": 1, "direction": "IN", "qty": 2, "reason": "Delivery test stock"},
+            headers=self.headers,
+        )
+        stocked.raise_for_status()
         before = self.client.get("/api/stock-by-warehouse", headers=self.headers)
         before.raise_for_status()
         before_qty = next(row["qty"] for row in before.json() if row["product_id"] == 1 and row["warehouse_id"] == 1)
@@ -464,6 +470,31 @@ class SafetyWorkflowTests(unittest.TestCase):
             ).status_code,
             200,
         )
+        operator = self.client.post(
+            "/api/users",
+            json={"username": "deliveryoperator", "password": "InventoryTest1!", "role": "inventory"},
+            headers=self.headers,
+        )
+        operator.raise_for_status()
+        operator_login = self.client.post(
+            "/api/auth/login",
+            data={"username": "deliveryoperator", "password": "InventoryTest1!"},
+        )
+        operator_login.raise_for_status()
+        operator_headers = {"Authorization": f"Bearer {operator_login.json()['access_token']}"}
+        delivered = self.client.post(
+            "/api/sales-deliveries",
+            json={"sales_order_id": order_id, "warehouse_id": 1},
+            headers=operator_headers,
+        )
+        delivered.raise_for_status()
+        self.assertEqual(delivered.json()["status"], "posted")
+        duplicate_delivery = self.client.post(
+            "/api/sales-deliveries",
+            json={"sales_order_id": order_id, "warehouse_id": 1},
+            headers=operator_headers,
+        )
+        self.assertEqual(duplicate_delivery.status_code, 400)
         converted = self.client.post(
             f"/api/sales-orders/{order_id}/convert",
             json={"warehouse_id": 1},
@@ -480,7 +511,7 @@ class SafetyWorkflowTests(unittest.TestCase):
         after = self.client.get("/api/stock-by-warehouse", headers=self.headers)
         after.raise_for_status()
         after_qty = next(row["qty"] for row in after.json() if row["product_id"] == 1 and row["warehouse_id"] == 1)
-        self.assertEqual(after_qty, before_qty)
+        self.assertEqual(after_qty, before_qty - 1)
 
     def test_purchase_order_creator_cannot_approve_own_order(self):
         order = self.client.post(
