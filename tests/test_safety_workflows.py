@@ -163,6 +163,12 @@ class SafetyWorkflowTests(unittest.TestCase):
         reference = transfer.json()["reference"]
         self.assertEqual(transfer.json()["reason"], "Move stock for operational use")
 
+        transfer_register = self.client.get("/api/stock-transfers", headers=self.headers)
+        transfer_register.raise_for_status()
+        transfer_record = next(x for x in transfer_register.json() if x["reference"] == reference)
+        self.assertEqual(transfer_record["reason"], "Move stock for operational use")
+        self.assertEqual(transfer_record["recorded_by"], "testadmin")
+
         movements = self.client.get("/api/stock-moves", headers=self.headers)
         movements.raise_for_status()
         related = [m for m in movements.json() if m["ref_no"] == reference]
