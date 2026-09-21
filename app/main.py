@@ -123,7 +123,7 @@ class UserUpdateIn(BaseModel): role:Optional[str]=None; active:Optional[bool]=No
 class ProductIn(BaseModel): sku:str; name:str; category:str='General'; unit:str='KG'; cost:float=0; sale_price:float=0; reorder_level:float=0
 class PartyIn(BaseModel): code:str; name:str; kind:str; phone:str=''; tax_id:str=''
 class WarehouseIn(BaseModel): code:str; name:str
-class StockTransferIn(BaseModel): product_id:int; from_warehouse_id:int; to_warehouse_id:int; qty:float=Field(gt=0)
+class StockTransferIn(BaseModel): product_id:int; from_warehouse_id:int; to_warehouse_id:int; qty:float=Field(gt=0); reason:str=Field(min_length=3,max_length=160)
 class StockAdjustmentIn(BaseModel): product_id:int; warehouse_id:int; direction:str; qty:float=Field(gt=0); reason:str=Field(min_length=3,max_length=160)
 class InvoiceLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
 class InvoiceIn(BaseModel): kind:str; party_id:int; warehouse_id:int; lines:list[InvoiceLineIn]; tax_rate:float=14; post_now:bool=True
@@ -374,9 +374,9 @@ def stock_transfer(x:StockTransferIn,actor:User=Depends(require_roles('admin','i
     reference='TRF-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
     move(s,product.id,source.id,x.qty,'OUT','transfer',reference)
     move(s,product.id,destination.id,x.qty,'IN','transfer',reference)
-    audit(s,actor,'transfer','stock_transfer',None,f'{reference}; {product.sku}; {source.code} to {destination.code}; qty {x.qty}')
+    audit(s,actor,'transfer','stock_transfer',None,f'{reference}; {product.sku}; {source.code} to {destination.code}; qty {x.qty}; {x.reason}')
     s.commit()
-    return {'reference':reference,'product':product.sku,'from_warehouse':source.code,'to_warehouse':destination.code,'qty':x.qty}
+    return {'reference':reference,'product':product.sku,'from_warehouse':source.code,'to_warehouse':destination.code,'qty':x.qty,'reason':x.reason}
 
 @app.get('/api/stock-adjustments')
 def stock_adjustments(_:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
