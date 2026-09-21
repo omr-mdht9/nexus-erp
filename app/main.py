@@ -373,6 +373,16 @@ def stock_transfer(x:StockTransferIn,actor:User=Depends(require_roles('admin','i
     s.commit()
     return {'reference':reference,'product':product.sku,'from_warehouse':source.code,'to_warehouse':destination.code,'qty':x.qty}
 
+@app.get('/api/stock-adjustments')
+def stock_adjustments(_:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    rows=s.query(AuditLog).filter_by(entity_type='stock_adjustment',action='adjust').order_by(AuditLog.id.desc()).limit(100).all()
+    out=[]
+    for row in rows:
+        parts=row.detail.split('; ')
+        if len(parts)<6: continue
+        out.append({'reference':parts[0],'product':parts[1],'warehouse':parts[2],'direction':parts[3],'qty':parts[4].replace('qty ',''),'reason':parts[5],'created_at':row.created_at.isoformat()})
+    return out
+
 @app.post('/api/stock-adjustments')
 def stock_adjustment(x:StockAdjustmentIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
     if x.direction not in ('IN','OUT'): raise HTTPException(400,'Adjustment direction must be IN or OUT')
