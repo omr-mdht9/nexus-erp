@@ -239,6 +239,26 @@ class SafetyWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_accountant_cannot_manage_users(self):
+        user = self.client.post(
+            "/api/users",
+            json={"username": "useradminreviewer", "password": "ReviewerTest1!", "role": "accountant"},
+            headers=self.headers,
+        )
+        user.raise_for_status()
+        login = self.client.post(
+            "/api/auth/login",
+            data={"username": "useradminreviewer", "password": "ReviewerTest1!"},
+        )
+        login.raise_for_status()
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        response = self.client.post(
+            "/api/users",
+            json={"username": "shouldnotcreate", "password": "RestrictedTest1!", "role": "inventory"},
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_stock_adjustment_cannot_reduce_below_available_stock(self):
         added = self.client.post(
             "/api/stock-adjustments",
