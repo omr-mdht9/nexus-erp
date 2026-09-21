@@ -219,6 +219,71 @@ class SafetyWorkflowTests(unittest.TestCase):
             403,
         )
 
+    def test_inventory_role_can_receive_approved_purchase_order(self):
+        order = self.client.post(
+            "/api/purchase-orders",
+            json={"supplier_id": 1, "lines": [{"product_id": 1, "qty": 2, "unit_price": 10}]},
+            headers=self.headers,
+        )
+        order.raise_for_status()
+        order_id = order.json()["id"]
+        self.assertEqual(
+            self.client.post(
+                f"/api/purchase-orders/{order_id}/workflow",
+                json={"action": "submit"},
+                headers=self.headers,
+            ).status_code,
+            200,
+        )
+        reviewer = self.client.post(
+            "/api/users",
+            json={"username": "receiptapprover", "password": "ReviewerTest1!", "role": "accountant"},
+            headers=self.headers,
+        )
+        reviewer.raise_for_status()
+        reviewer_login = self.client.post(
+            "/api/auth/login",
+            data={"username": "receiptapprover", "password": "ReviewerTest1!"},
+        )
+        reviewer_login.raise_for_status()
+        reviewer_headers = {"Authorization": f"Bearer {reviewer_login.json()['access_token']}"}
+        self.assertEqual(
+            self.client.post(
+                f"/api/purchase-orders/{order_id}/workflow",
+                json={"action": "approve"},
+                headers=reviewer_headers,
+            ).status_code,
+            200,
+        )
+        operator = self.client.post(
+            "/api/users",
+            json={"username": "receiptoperator", "password": "InventoryTest1!", "role": "inventory"},
+            headers=self.headers,
+        )
+        operator.raise_for_status()
+        operator_login = self.client.post(
+            "/api/auth/login",
+            data={"username": "receiptoperator", "password": "InventoryTest1!"},
+        )
+        operator_login.raise_for_status()
+        operator_headers = {"Authorization": f"Bearer {operator_login.json()['access_token']}"}
+        receipt = self.client.post(
+            "/api/purchase-receipts",
+            json={"purchase_order_id": order_id, "warehouse_id": 1},
+            headers=operator_headers,
+        )
+        receipt.raise_for_status()
+        self.assertEqual(receipt.json()["status"], "posted")
+        duplicate = self.client.post(
+            "/api/purchase-receipts",
+            json={"purchase_order_id": order_id, "warehouse_id": 1},
+            headers=operator_headers,
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        register = self.client.get("/api/purchase-receipts", headers=operator_headers)
+        register.raise_for_status()
+        self.assertTrue(any(row["purchase_order_id"] == order_id for row in register.json()))
+
     def test_inventory_role_can_transfer_available_stock(self):
         warehouse = self.client.post(
             "/api/warehouses",
