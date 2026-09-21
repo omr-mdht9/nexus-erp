@@ -219,6 +219,52 @@ class SafetyWorkflowTests(unittest.TestCase):
             403,
         )
 
+    def test_inventory_role_can_transfer_available_stock(self):
+        warehouse = self.client.post(
+            "/api/warehouses",
+            json={"code": "WH-ROLE", "name": "Role Test Destination"},
+            headers=self.headers,
+        )
+        warehouse.raise_for_status()
+        destination_id = warehouse.json()["id"]
+        receipt = self.client.post(
+            "/api/invoices",
+            json={
+                "kind": "purchase",
+                "party_id": 1,
+                "warehouse_id": 1,
+                "lines": [{"product_id": 1, "qty": 3, "unit_price": 10}],
+                "post_now": True,
+            },
+            headers=self.headers,
+        )
+        receipt.raise_for_status()
+        user = self.client.post(
+            "/api/users",
+            json={"username": "transferoperator", "password": "InventoryTest1!", "role": "inventory"},
+            headers=self.headers,
+        )
+        user.raise_for_status()
+        login = self.client.post(
+            "/api/auth/login",
+            data={"username": "transferoperator", "password": "InventoryTest1!"},
+        )
+        login.raise_for_status()
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        transfer = self.client.post(
+            "/api/stock-transfers",
+            json={
+                "product_id": 1,
+                "from_warehouse_id": 1,
+                "to_warehouse_id": destination_id,
+                "qty": 1,
+                "reason": "Authorized warehouse replenishment",
+            },
+            headers=headers,
+        )
+        transfer.raise_for_status()
+        self.assertEqual(transfer.json()["status"], "posted")
+
     def test_accountant_cannot_adjust_stock(self):
         user = self.client.post(
             "/api/users",
