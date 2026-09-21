@@ -365,6 +365,17 @@ def moves(_:User=Depends(current_user),s:Session=Depends(db)):
         p=s.get(Product,m.product_id); w=s.get(Warehouse,m.warehouse_id); out.append({'id':m.id,'product':p.name if p else '?','warehouse':w.name if w else '?','qty':m.qty,'direction':m.direction,'ref_type':m.ref_type,'ref_no':m.ref_no,'created_at':m.created_at.isoformat()})
     return out
 
+@app.get('/api/stock-transfers')
+def stock_transfers(_:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    rows=s.query(AuditLog).filter_by(entity_type='stock_transfer',action='transfer').order_by(AuditLog.id.desc()).limit(100).all()
+    out=[]
+    for row in rows:
+        parts=row.detail.split('; ')
+        if len(parts)<5 or ' to ' not in parts[2]: continue
+        source,destination=parts[2].split(' to ',1); actor=s.get(User,row.actor_id)
+        out.append({'reference':parts[0],'product':parts[1],'from_warehouse':source,'to_warehouse':destination,'qty':parts[3].replace('qty ',''),'reason':parts[4],'recorded_by':actor.username if actor else 'Unknown','created_at':row.created_at.isoformat()})
+    return out
+
 @app.post('/api/stock-transfers')
 def stock_transfer(x:StockTransferIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
     product=s.get(Product,x.product_id); source=s.get(Warehouse,x.from_warehouse_id); destination=s.get(Warehouse,x.to_warehouse_id)
