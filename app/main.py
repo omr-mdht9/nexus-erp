@@ -59,6 +59,8 @@ class PurchaseOrder(Base):
     __tablename__='purchase_orders'; id=Column(Integer,primary_key=True); po_no=Column(String(50),unique=True,nullable=False); supplier_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesOrder(Base):
     __tablename__='sales_orders'; id=Column(Integer,primary_key=True); order_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+class SalesDelivery(Base):
+    __tablename__='sales_deliveries'; id=Column(Integer,primary_key=True); delivery_no=Column(String(50),unique=True,nullable=False); sales_order_id=Column(Integer,ForeignKey('sales_orders.id'),unique=True,nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); status=Column(String(20),default='posted'); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesQuotationLine(Base):
     __tablename__='sales_quotation_lines'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
 class PurchaseOrderLine(Base):
@@ -148,6 +150,7 @@ class PurchaseOrderWorkflowIn(BaseModel): action:str
 class PurchaseReceiptIn(BaseModel): purchase_order_id:int; warehouse_id:int
 class SalesOrderIn(BaseModel): customer_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
 class SalesOrderWorkflowIn(BaseModel): action:str
+class SalesDeliveryIn(BaseModel): sales_order_id:int; warehouse_id:int
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
 class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
 
@@ -296,6 +299,31 @@ def sales_order_workflow(order_id:int,x:SalesOrderWorkflowIn,actor:User=Depends(
     if x.action=='approve' and creator and creator.actor_id==actor.id: raise HTTPException(403,'Sales order creator cannot approve the same sales order')
     order.status=target;audit(s,actor,'workflow_'+x.action,'sales_order',order.id,f'{order.order_no}; status {target}');s.commit()
     return {'id':order.id,'order_no':order.order_no,'status':order.status}
+
+@app.get('/api/sales-deliveries')
+def sales_deliveries(_:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    out=[]
+    for delivery in s.query(SalesDelivery).order_by(SalesDelivery.id.desc()).limit(100):
+        order=s.get(SalesOrder,delivery.sales_order_id); warehouse=s.get(Warehouse,delivery.warehouse_id)
+        customer=s.get(Party,order.customer_id) if order else None
+        out.append({'id':delivery.id,'delivery_no':delivery.delivery_no,'sales_order_id':delivery.sales_order_id,'order_no':order.order_no if order else '?','customer':customer.name if customer else '?','warehouse':warehouse.name if warehouse else '?','status':delivery.status,'created_at':delivery.created_at.isoformat()})
+    return out
+
+@app.post('/api/sales-deliveries')
+def create_sales_delivery(x:SalesDeliveryIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    order=s.get(SalesOrder,x.sales_order_id); warehouse=s.get(Warehouse,x.warehouse_id)
+    if not order or order.status!='approved': raise HTTPException(400,'Only approved sales orders can be delivered')
+    if not warehouse: raise HTTPException(400,'Invalid warehouse')
+    if s.query(SalesDelivery).filter_by(sales_order_id=order.id).first(): raise HTTPException(400,'Sales order has already been delivered')
+    lines=s.query(SalesOrderLine).filter_by(sales_order_id=order.id).all()
+    if not lines: raise HTTPException(400,'Sales order requires product lines before delivery')
+    no='DEL-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
+    for line in lines:
+        if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on sales order')
+        move(s,line.product_id,warehouse.id,line.qty,'OUT','delivery',no)
+    delivery=SalesDelivery(delivery_no=no,sales_order_id=order.id,warehouse_id=warehouse.id);s.add(delivery);s.flush()
+    order.status='delivered';audit(s,actor,'deliver','sales_order',order.id,f'{order.order_no}; delivery {no}; warehouse {warehouse.code}')
+    s.commit(); return {'delivery_no':no,'sales_order_id':order.id,'warehouse_id':warehouse.id,'status':'posted'}
 
 @app.get('/api/purchase-orders')
 def purchase_orders(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -525,7 +553,10 @@ def post_approved_invoice(invoice_id:int,actor:User=Depends(require_roles('admin
         if not product: raise HTTPException(404,'Product not found')
         if inv.kind=='purchase': move(s,product.id,wh.id,line.qty,'IN','purchase',inv.invoice_no)
         else:
-            move(s,product.id,wh.id,line.qty,'OUT','sale',inv.invoice_no); cogs += line.qty*product.cost
+            delivered=s.query(SalesOrderConversion).filter_by(invoice_id=inv.id).first()
+            if delivered and not s.query(SalesDelivery).filter_by(sales_order_id=delivered.sales_order_id).first(): raise HTTPException(400,'Sales-order invoice requires a delivery record before posting')
+            if not delivered: move(s,product.id,wh.id,line.qty,'OUT','sale',inv.invoice_no)
+            cogs += line.qty*product.cost
     if inv.kind=='purchase':
         j=journal(s,f'Purchase {inv.invoice_no}',[(inv_acct,inv.subtotal,0),(vat,inv.tax_amount,0),(party_acct,0,inv.total)])
     else:
@@ -805,7 +836,7 @@ def convert_sales_quotation(quote_id:int,x:QuotationConvertIn,actor:User=Depends
 @app.post('/api/sales-orders/{order_id}/convert')
 def convert_sales_order(order_id:int,x:QuotationConvertIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     order=s.get(SalesOrder,order_id)
-    if not order or order.status!='approved': raise HTTPException(400,'Only approved sales orders can be converted')
+    if not order or order.status!='delivered': raise HTTPException(400,'Only delivered sales orders can be converted')
     if s.query(SalesOrderConversion).filter_by(sales_order_id=order.id).first(): raise HTTPException(400,'Sales order has already been converted')
     if not s.get(Warehouse,x.warehouse_id): raise HTTPException(400,'Invalid warehouse')
     lines=s.query(SalesOrderLine).filter_by(sales_order_id=order.id).all()
