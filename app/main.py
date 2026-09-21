@@ -61,6 +61,8 @@ class SalesQuotationLine(Base):
     __tablename__='sales_quotation_lines'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
 class PurchaseOrderLine(Base):
     __tablename__='purchase_order_lines'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
+class PurchaseReceipt(Base):
+    __tablename__='purchase_receipts'; id=Column(Integer,primary_key=True); receipt_no=Column(String(50),unique=True,nullable=False); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),unique=True,nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); status=Column(String(20),default='posted'); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesQuotationConversion(Base):
     __tablename__='sales_quotation_conversions'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),unique=True,nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),unique=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class PurchaseOrderConversion(Base):
@@ -137,6 +139,7 @@ class QuotationConvertIn(BaseModel): warehouse_id:int; tax_rate:float=Field(defa
 class SalesQuotationWorkflowIn(BaseModel): action:str
 class PurchaseOrderIn(BaseModel): supplier_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
 class PurchaseOrderWorkflowIn(BaseModel): action:str
+class PurchaseReceiptIn(BaseModel): purchase_order_id:int; warehouse_id:int
 class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
 class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
 
@@ -538,6 +541,32 @@ def create_production(x:ProductionIn,actor:User=Depends(require_roles('admin','i
     p=Production(production_no=no,bom_id=b.id,warehouse_id=w.id,qty=x.qty,total_cost=total); s.add(p); s.flush()
     lines=[(acct(s,'1300'),total,0),(acct(s,'1300'),0,total)]
     j=journal(s,f'Production {no}',lines); audit(s,actor,'post','production',p.id,no); s.commit(); return {'production_no':no,'total_cost':total,'unit_cost':total/x.qty}
+
+
+@app.get('/api/purchase-receipts')
+def purchase_receipts(_:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    out=[]
+    for receipt in s.query(PurchaseReceipt).order_by(PurchaseReceipt.id.desc()).limit(100):
+        po=s.get(PurchaseOrder,receipt.purchase_order_id); warehouse=s.get(Warehouse,receipt.warehouse_id)
+        supplier=s.get(Party,po.supplier_id) if po else None
+        out.append({'id':receipt.id,'receipt_no':receipt.receipt_no,'purchase_order_id':receipt.purchase_order_id,'po_no':po.po_no if po else '?','supplier':supplier.name if supplier else '?','warehouse':warehouse.name if warehouse else '?','status':receipt.status,'created_at':receipt.created_at.isoformat()})
+    return out
+
+@app.post('/api/purchase-receipts')
+def create_purchase_receipt(x:PurchaseReceiptIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
+    po=s.get(PurchaseOrder,x.purchase_order_id); warehouse=s.get(Warehouse,x.warehouse_id)
+    if not po or po.status!='approved': raise HTTPException(400,'Only approved purchase orders can be received')
+    if not warehouse: raise HTTPException(400,'Invalid warehouse')
+    if s.query(PurchaseReceipt).filter_by(purchase_order_id=po.id).first(): raise HTTPException(400,'Purchase order has already been received')
+    lines=s.query(PurchaseOrderLine).filter_by(purchase_order_id=po.id).all()
+    if not lines: raise HTTPException(400,'Purchase order requires product lines before receipt')
+    no='GRN-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
+    for line in lines:
+        if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on purchase order')
+        move(s,line.product_id,warehouse.id,line.qty,'IN','purchase_receipt',no)
+    receipt=PurchaseReceipt(receipt_no=no,purchase_order_id=po.id,warehouse_id=warehouse.id);s.add(receipt);s.flush()
+    audit(s,actor,'receive','purchase_order',po.id,f'{po.po_no}; receipt {no}; warehouse {warehouse.code}')
+    s.commit(); return {'receipt_no':no,'purchase_order_id':po.id,'warehouse_id':warehouse.id,'status':'posted'}
 
 @app.get('/api/payments')
 def payments(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
