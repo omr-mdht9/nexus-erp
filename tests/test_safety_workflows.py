@@ -168,6 +168,11 @@ class SafetyWorkflowTests(unittest.TestCase):
         self.assertEqual({m["direction"] for m in related}, {"IN", "OUT"})
         self.assertEqual(sum(m["qty"] for m in related), 4)
 
+        balances = self.client.get("/api/stock-by-warehouse", headers=self.headers)
+        balances.raise_for_status()
+        destination = next(x for x in balances.json() if x["product_id"] == 1 and x["warehouse_id"] == destination_id)
+        self.assertEqual(destination["qty"], 2)
+
     def test_accountant_cannot_adjust_stock(self):
         user = self.client.post(
             "/api/users",
