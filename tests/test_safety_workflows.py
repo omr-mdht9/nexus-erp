@@ -181,6 +181,26 @@ class SafetyWorkflowTests(unittest.TestCase):
         destination = next(x for x in balances.json() if x["product_id"] == 1 and x["warehouse_id"] == destination_id)
         self.assertEqual(destination["qty"], 2)
 
+    def test_inventory_role_cannot_create_financial_invoice(self):
+        user = self.client.post(
+            "/api/users",
+            json={"username": "inventorytester", "password": "InventoryTest1!", "role": "inventory"},
+            headers=self.headers,
+        )
+        user.raise_for_status()
+        login = self.client.post(
+            "/api/auth/login",
+            data={"username": "inventorytester", "password": "InventoryTest1!"},
+        )
+        login.raise_for_status()
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        response = self.client.post(
+            "/api/invoices",
+            json={"kind": "sale", "party_id": 2, "warehouse_id": 1, "lines": [{"product_id": 1, "qty": 1, "unit_price": 10}]},
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_accountant_cannot_adjust_stock(self):
         user = self.client.post(
             "/api/users",
