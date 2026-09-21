@@ -225,6 +225,11 @@ class SafetyWorkflowTests(unittest.TestCase):
         self.assertEqual(related[0]["direction"], "IN")
         self.assertEqual(related[0]["ref_type"], "adjustment")
 
+        register = self.client.get("/api/stock-adjustments", headers=self.headers)
+        register.raise_for_status()
+        record = next(x for x in register.json() if x["reference"] == reference)
+        self.assertEqual(record["reason"], "Cycle count correction")
+
     def test_purchase_order_creator_cannot_approve_own_order(self):
         order = self.client.post(
             "/api/purchase-orders",
