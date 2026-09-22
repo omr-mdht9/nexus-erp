@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 import time
 from typing import Optional
 import os
@@ -9,7 +10,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Boolean, UniqueConstraint, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, Numeric, DateTime, ForeignKey, Boolean, UniqueConstraint, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./erp.db')
@@ -24,6 +25,18 @@ oauth2 = OAuth2PasswordBearer(tokenUrl='/api/auth/login')
 LOGIN_FAILURES = {}
 LOGIN_WINDOW_SECONDS = 900
 LOGIN_MAX_FAILURES = 5
+APP_VERSION = '0.3.0'
+MONEY_QUANTUM = Decimal('0.01')
+ZERO = Decimal('0.00')
+EPSILON = Decimal('0.0001')
+
+def decimal_value(value) -> Decimal:
+    if value is None:
+        return ZERO
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+def money_value(value) -> Decimal:
+    return decimal_value(value).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 class User(Base):
     __tablename__='users'; id=Column(Integer,primary_key=True); username=Column(String(80),unique=True,nullable=False); password_hash=Column(String(255),nullable=False); role=Column(String(30),default='admin'); active=Column(Boolean,default=True)
@@ -32,7 +45,7 @@ class Account(Base):
 class Warehouse(Base):
     __tablename__='warehouses'; id=Column(Integer,primary_key=True); code=Column(String(30),unique=True,nullable=False); name=Column(String(160),nullable=False)
 class Product(Base):
-    __tablename__='products'; id=Column(Integer,primary_key=True); sku=Column(String(60),unique=True,nullable=False); name=Column(String(160),nullable=False); category=Column(String(80),default='General'); unit=Column(String(30),default='KG'); cost=Column(Float,default=0); sale_price=Column(Float,default=0); reorder_level=Column(Float,default=0); active=Column(Boolean,default=True)
+    __tablename__='products'; id=Column(Integer,primary_key=True); sku=Column(String(60),unique=True,nullable=False); name=Column(String(160),nullable=False); category=Column(String(80),default='General'); unit=Column(String(30),default='KG'); cost=Column(Numeric(18,2),default=ZERO); sale_price=Column(Numeric(18,2),default=ZERO); reorder_level=Column(Float,default=0); active=Column(Boolean,default=True)
 class Party(Base):
     __tablename__='parties'; id=Column(Integer,primary_key=True); code=Column(String(40),unique=True,nullable=False); name=Column(String(160),nullable=False); kind=Column(String(20),nullable=False); phone=Column(String(60),default=''); tax_id=Column(String(80),default='')
 class Stock(Base):
@@ -42,31 +55,31 @@ class StockMove(Base):
 class Journal(Base):
     __tablename__='journals'; id=Column(Integer,primary_key=True); entry_no=Column(String(50),unique=True,nullable=False); description=Column(String(255),default=''); created_at=Column(DateTime,default=datetime.utcnow)
 class JournalLine(Base):
-    __tablename__='journal_lines'; id=Column(Integer,primary_key=True); journal_id=Column(Integer,ForeignKey('journals.id'),nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); debit=Column(Float,default=0); credit=Column(Float,default=0)
+    __tablename__='journal_lines'; id=Column(Integer,primary_key=True); journal_id=Column(Integer,ForeignKey('journals.id'),nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); debit=Column(Numeric(18,2),default=ZERO); credit=Column(Numeric(18,2),default=ZERO)
 class Invoice(Base):
-    __tablename__='invoices'; id=Column(Integer,primary_key=True); invoice_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); subtotal=Column(Float,default=0); tax_rate=Column(Float,default=0); tax_amount=Column(Float,default=0); total=Column(Float,default=0); status=Column(String(20),default='posted'); created_at=Column(DateTime,default=datetime.utcnow)
+    __tablename__='invoices'; id=Column(Integer,primary_key=True); invoice_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); subtotal=Column(Numeric(18,2),default=ZERO); tax_rate=Column(Numeric(7,4),default=ZERO); tax_amount=Column(Numeric(18,2),default=ZERO); total=Column(Numeric(18,2),default=ZERO); status=Column(String(20),default='draft'); created_by_id=Column(Integer,ForeignKey('users.id'),nullable=True); source_type=Column(String(40),nullable=True); source_id=Column(Integer,nullable=True); created_at=Column(DateTime,default=datetime.utcnow)
 class InvoiceLine(Base):
-    __tablename__='invoice_lines'; id=Column(Integer,primary_key=True); invoice_id=Column(Integer,ForeignKey('invoices.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False); line_total=Column(Float,default=0)
+    __tablename__='invoice_lines'; id=Column(Integer,primary_key=True); invoice_id=Column(Integer,ForeignKey('invoices.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Numeric(18,2),nullable=False); line_total=Column(Numeric(18,2),default=ZERO)
 class BOM(Base):
     __tablename__='boms'; id=Column(Integer,primary_key=True); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); quantity=Column(Float,default=1); active=Column(Boolean,default=True)
 class BOMLine(Base):
     __tablename__='bom_lines'; id=Column(Integer,primary_key=True); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); component_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False)
 class Production(Base):
-    __tablename__='productions'; id=Column(Integer,primary_key=True); production_no=Column(String(50),unique=True,nullable=False); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); qty=Column(Float,nullable=False); status=Column(String(20),default='posted'); total_cost=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+    __tablename__='productions'; id=Column(Integer,primary_key=True); production_no=Column(String(50),unique=True,nullable=False); bom_id=Column(Integer,ForeignKey('boms.id'),nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); qty=Column(Float,nullable=False); status=Column(String(20),default='posted'); total_cost=Column(Numeric(18,2),default=ZERO); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesQuotation(Base):
-    __tablename__='sales_quotations'; id=Column(Integer,primary_key=True); quote_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+    __tablename__='sales_quotations'; id=Column(Integer,primary_key=True); quote_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Numeric(18,2),default=ZERO); created_at=Column(DateTime,default=datetime.utcnow)
 class PurchaseOrder(Base):
-    __tablename__='purchase_orders'; id=Column(Integer,primary_key=True); po_no=Column(String(50),unique=True,nullable=False); supplier_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+    __tablename__='purchase_orders'; id=Column(Integer,primary_key=True); po_no=Column(String(50),unique=True,nullable=False); supplier_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Numeric(18,2),default=ZERO); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesOrder(Base):
-    __tablename__='sales_orders'; id=Column(Integer,primary_key=True); order_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Float,default=0); created_at=Column(DateTime,default=datetime.utcnow)
+    __tablename__='sales_orders'; id=Column(Integer,primary_key=True); order_no=Column(String(50),unique=True,nullable=False); customer_id=Column(Integer,ForeignKey('parties.id'),nullable=False); status=Column(String(20),default='draft'); total=Column(Numeric(18,2),default=ZERO); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesDelivery(Base):
     __tablename__='sales_deliveries'; id=Column(Integer,primary_key=True); delivery_no=Column(String(50),unique=True,nullable=False); sales_order_id=Column(Integer,ForeignKey('sales_orders.id'),unique=True,nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); status=Column(String(20),default='posted'); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesQuotationLine(Base):
-    __tablename__='sales_quotation_lines'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
+    __tablename__='sales_quotation_lines'; id=Column(Integer,primary_key=True); quotation_id=Column(Integer,ForeignKey('sales_quotations.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Numeric(18,2),nullable=False)
 class PurchaseOrderLine(Base):
-    __tablename__='purchase_order_lines'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
+    __tablename__='purchase_order_lines'; id=Column(Integer,primary_key=True); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Numeric(18,2),nullable=False)
 class SalesOrderLine(Base):
-    __tablename__='sales_order_lines'; id=Column(Integer,primary_key=True); sales_order_id=Column(Integer,ForeignKey('sales_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Float,nullable=False)
+    __tablename__='sales_order_lines'; id=Column(Integer,primary_key=True); sales_order_id=Column(Integer,ForeignKey('sales_orders.id'),nullable=False); product_id=Column(Integer,ForeignKey('products.id'),nullable=False); qty=Column(Float,nullable=False); unit_price=Column(Numeric(18,2),nullable=False)
 class PurchaseReceipt(Base):
     __tablename__='purchase_receipts'; id=Column(Integer,primary_key=True); receipt_no=Column(String(50),unique=True,nullable=False); purchase_order_id=Column(Integer,ForeignKey('purchase_orders.id'),unique=True,nullable=False); warehouse_id=Column(Integer,ForeignKey('warehouses.id'),nullable=False); status=Column(String(20),default='posted'); created_at=Column(DateTime,default=datetime.utcnow)
 class SalesQuotationConversion(Base):
@@ -76,9 +89,9 @@ class PurchaseOrderConversion(Base):
 class SalesOrderConversion(Base):
     __tablename__='sales_order_conversions'; id=Column(Integer,primary_key=True); sales_order_id=Column(Integer,ForeignKey('sales_orders.id'),unique=True,nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),unique=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class Payment(Base):
-    __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Float,nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
+    __tablename__='payments'; id=Column(Integer,primary_key=True); payment_no=Column(String(50),unique=True,nullable=False); kind=Column(String(20),nullable=False); party_id=Column(Integer,ForeignKey('parties.id'),nullable=False); amount=Column(Numeric(18,2),nullable=False); account_id=Column(Integer,ForeignKey('accounts.id'),nullable=False); status=Column(String(20),default='posted',nullable=False); voided_at=Column(DateTime,nullable=True); voided_by_id=Column(Integer,ForeignKey('users.id'),nullable=True); reversal_journal_id=Column(Integer,ForeignKey('journals.id'),nullable=True); created_at=Column(DateTime,default=datetime.utcnow)
 class PaymentAllocation(Base):
-    __tablename__='payment_allocations'; id=Column(Integer,primary_key=True); payment_id=Column(Integer,ForeignKey('payments.id'),nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),nullable=False); amount=Column(Float,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
+    __tablename__='payment_allocations'; id=Column(Integer,primary_key=True); payment_id=Column(Integer,ForeignKey('payments.id'),nullable=False); invoice_id=Column(Integer,ForeignKey('invoices.id'),nullable=False); amount=Column(Numeric(18,2),nullable=False); active=Column(Boolean,default=True,nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 class AuditLog(Base):
     __tablename__='audit_logs'; id=Column(Integer,primary_key=True); actor_id=Column(Integer,ForeignKey('users.id'),nullable=False); action=Column(String(80),nullable=False); entity_type=Column(String(50),nullable=False); entity_id=Column(Integer,nullable=True); detail=Column(String(255),default='',nullable=False); created_at=Column(DateTime,default=datetime.utcnow)
 
@@ -113,7 +126,7 @@ def seed(s:Session):
     s.commit()
 with SessionLocal() as s: seed(s)
 
-app=FastAPI(title='Nexus ERP API',version='0.2.0')
+app=FastAPI(title='Nexus ERP API',version=APP_VERSION)
 app.mount('/static',StaticFiles(directory='app/static'),name='static')
 @app.middleware('http')
 async def security_headers(request, call_next):
@@ -130,29 +143,29 @@ def home(): return FileResponse('app/static/index.html')
 class TokenOut(BaseModel): access_token:str; token_type:str='bearer'
 class UserCreateIn(BaseModel): username:str=Field(min_length=3,max_length=80); password:str=Field(min_length=8,max_length=72); role:str='inventory'
 class UserUpdateIn(BaseModel): role:Optional[str]=None; active:Optional[bool]=None; password:Optional[str]=Field(default=None,min_length=8,max_length=72)
-class ProductIn(BaseModel): sku:str; name:str; category:str='General'; unit:str='KG'; cost:float=0; sale_price:float=0; reorder_level:float=0
+class ProductIn(BaseModel): sku:str; name:str; category:str='General'; unit:str='KG'; cost:Decimal=Field(default=ZERO,ge=0); sale_price:Decimal=Field(default=ZERO,ge=0); reorder_level:float=Field(default=0,ge=0)
 class PartyIn(BaseModel): code:str; name:str; kind:str; phone:str=''; tax_id:str=''
 class WarehouseIn(BaseModel): code:str; name:str
 class StockTransferIn(BaseModel): product_id:int; from_warehouse_id:int; to_warehouse_id:int; qty:float=Field(gt=0); reason:str=Field(min_length=3,max_length=160)
 class StockAdjustmentIn(BaseModel): product_id:int; warehouse_id:int; direction:str; qty:float=Field(gt=0); reason:str=Field(min_length=3,max_length=160)
-class InvoiceLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
-class InvoiceIn(BaseModel): kind:str; party_id:int; warehouse_id:int; lines:list[InvoiceLineIn]; tax_rate:float=14; post_now:bool=True
+class InvoiceLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:Decimal=Field(ge=0)
+class InvoiceIn(BaseModel): kind:str; party_id:int; warehouse_id:int; lines:list[InvoiceLineIn]=Field(min_length=1); tax_rate:Decimal=Field(default=Decimal('14.00'),ge=0); post_now:bool=False
 class InvoiceWorkflowIn(BaseModel): action:str
 class BOMLineIn(BaseModel): component_id:int; qty:float=Field(gt=0)
 class BOMIn(BaseModel): product_id:int; quantity:float=Field(gt=0); lines:list[BOMLineIn]
 class ProductionIn(BaseModel): bom_id:int; warehouse_id:int; qty:float=Field(gt=0)
-class CommercialLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:float=Field(ge=0)
-class SalesQuotationIn(BaseModel): customer_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
-class QuotationConvertIn(BaseModel): warehouse_id:int; tax_rate:float=Field(default=14,ge=0)
+class CommercialLineIn(BaseModel): product_id:int; qty:float=Field(gt=0); unit_price:Decimal=Field(ge=0)
+class SalesQuotationIn(BaseModel): customer_id:int; total:Optional[Decimal]=None; lines:list[CommercialLineIn]=[]
+class QuotationConvertIn(BaseModel): warehouse_id:int; tax_rate:Decimal=Field(default=Decimal('14.00'),ge=0)
 class SalesQuotationWorkflowIn(BaseModel): action:str
-class PurchaseOrderIn(BaseModel): supplier_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
+class PurchaseOrderIn(BaseModel): supplier_id:int; total:Optional[Decimal]=None; lines:list[CommercialLineIn]=[]
 class PurchaseOrderWorkflowIn(BaseModel): action:str
 class PurchaseReceiptIn(BaseModel): purchase_order_id:int; warehouse_id:int
-class SalesOrderIn(BaseModel): customer_id:int; total:Optional[float]=None; lines:list[CommercialLineIn]=[]
+class SalesOrderIn(BaseModel): customer_id:int; total:Optional[Decimal]=None; lines:list[CommercialLineIn]=[]
 class SalesOrderWorkflowIn(BaseModel): action:str
 class SalesDeliveryIn(BaseModel): sales_order_id:int; warehouse_id:int
-class PaymentIn(BaseModel): kind:str; party_id:int; amount:float=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
-class AllocationIn(BaseModel): invoice_id:int; amount:float=Field(gt=0)
+class PaymentIn(BaseModel): kind:str; party_id:int; amount:Decimal=Field(gt=0); account_code:str='1000'; invoice_id:Optional[int]=None
+class AllocationIn(BaseModel): invoice_id:int; amount:Decimal=Field(gt=0)
 
 @app.post('/api/auth/login',response_model=TokenOut)
 def login(form:OAuth2PasswordRequestForm=Depends(),s:Session=Depends(db)):
@@ -183,6 +196,10 @@ def require_roles(*roles):
 def audit(s:Session, actor:User, action:str, entity_type:str, entity_id:Optional[int]=None, detail:str=''):
     s.add(AuditLog(actor_id=actor.id,action=action,entity_type=entity_type,entity_id=entity_id,detail=detail))
 
+def require_independent_invoice_actor(inv:Invoice, actor:User, action:str):
+    if inv.created_by_id is None: raise HTTPException(409,'Invoice creator identity is unavailable; restore authorship before approval or posting')
+    if inv.created_by_id==actor.id: raise HTTPException(403,f'Invoice creator cannot {action} the same invoice')
+
 USER_ROLES = {'admin','accountant','inventory'}
 
 def validate_password(value:str):
@@ -196,9 +213,10 @@ def acct(s,code):
     return a
 
 def journal(s,desc,lines):
-    if round(sum(x[1] for x in lines)-sum(x[2] for x in lines),2)!=0: raise HTTPException(500,'Unbalanced journal entry')
+    normalized=[(account,money_value(debit),money_value(credit)) for account,debit,credit in lines]
+    if money_value(sum((x[1] for x in normalized),ZERO)-sum((x[2] for x in normalized),ZERO))!=ZERO: raise HTTPException(500,'Unbalanced journal entry')
     no='JE-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; j=Journal(entry_no=no,description=desc); s.add(j); s.flush()
-    for a,d,c in lines: s.add(JournalLine(journal_id=j.id,account_id=a.id,debit=d,credit=c))
+    for a,d,c in normalized: s.add(JournalLine(journal_id=j.id,account_id=a.id,debit=d,credit=c))
     return j
 
 def stock_row(s,pid,wid):
@@ -227,7 +245,7 @@ def sales_quotation_detail(quote_id:int,_:User=Depends(require_roles('admin','ac
     q=s.get(SalesQuotation,quote_id)
     if not q: raise HTTPException(404,'Sales quotation not found')
     lines=s.query(SalesQuotationLine).filter_by(quotation_id=q.id).all()
-    return {'id':q.id,'quote_no':q.quote_no,'customer':s.get(Party,q.customer_id).name,'status':q.status,'total':q.total,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':round(line.qty*line.unit_price,2)} for line in lines]}
+    return {'id':q.id,'quote_no':q.quote_no,'customer':s.get(Party,q.customer_id).name,'status':q.status,'total':q.total,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':money_value(decimal_value(line.qty)*decimal_value(line.unit_price))} for line in lines]}
 
 @app.post('/api/sales-quotations')
 def create_sales_quotation(x:SalesQuotationIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -235,10 +253,11 @@ def create_sales_quotation(x:SalesQuotationIn,actor:User=Depends(require_roles('
     if not customer or customer.kind!='customer': raise HTTPException(400,'Invalid customer')
     total=x.total
     if x.lines:
-        total=0
+        total=ZERO
         for line in x.lines:
             if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on quotation')
-            total+=line.qty*line.unit_price
+            total+=decimal_value(line.qty)*line.unit_price
+        total=money_value(total)
     if not total or total<=0: raise HTTPException(400,'Quotation total or line items are required')
     no='QTN-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];q=SalesQuotation(quote_no=no,customer_id=customer.id,total=total);s.add(q);s.flush()
     for line in x.lines: s.add(SalesQuotationLine(quotation_id=q.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price))
@@ -258,19 +277,20 @@ def sales_quotation_workflow(quote_id:int,x:SalesQuotationWorkflowIn,actor:User=
     return {'id':q.id,'quote_no':q.quote_no,'status':q.status}
 
 @app.get('/api/sales-orders')
-def sales_orders(_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
+def sales_orders(user:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     def creator_for(order):
         entry=s.query(AuditLog).filter_by(entity_type='sales_order',entity_id=order.id,action='create').order_by(AuditLog.id.asc()).first()
         user=s.get(User,entry.actor_id) if entry else None
         return user.username if user else '—'
-    return [{'id':order.id,'order_no':order.order_no,'customer':s.get(Party,order.customer_id).name,'status':order.status,'total':order.total,'created_at':order.created_at.isoformat(),'created_by':creator_for(order)} for order in s.query(SalesOrder).order_by(SalesOrder.id.desc()).limit(100)]
+    return [{'id':order.id,'order_no':order.order_no,'customer':s.get(Party,order.customer_id).name,'status':order.status,'total':order.total if user.role in ('admin','accountant') else None,'created_at':order.created_at.isoformat(),'created_by':creator_for(order)} for order in s.query(SalesOrder).order_by(SalesOrder.id.desc()).limit(100)]
 
 @app.get('/api/sales-orders/{order_id}')
-def sales_order_detail(order_id:int,_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
+def sales_order_detail(order_id:int,user:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     order=s.get(SalesOrder,order_id)
     if not order: raise HTTPException(404,'Sales order not found')
     lines=s.query(SalesOrderLine).filter_by(sales_order_id=order.id).all()
-    return {'id':order.id,'order_no':order.order_no,'customer':s.get(Party,order.customer_id).name,'status':order.status,'total':order.total,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':round(line.qty*line.unit_price,2)} for line in lines]}
+    finance=user.role in ('admin','accountant')
+    return {'id':order.id,'order_no':order.order_no,'customer':s.get(Party,order.customer_id).name,'status':order.status,'total':order.total if finance else None,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price if finance else None,'line_total':money_value(decimal_value(line.qty)*decimal_value(line.unit_price)) if finance else None} for line in lines]}
 
 @app.post('/api/sales-orders')
 def create_sales_order(x:SalesOrderIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -278,10 +298,11 @@ def create_sales_order(x:SalesOrderIn,actor:User=Depends(require_roles('admin','
     if not customer or customer.kind!='customer': raise HTTPException(400,'Invalid customer')
     total=x.total
     if x.lines:
-        total=0
+        total=ZERO
         for line in x.lines:
             if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on sales order')
-            total+=line.qty*line.unit_price
+            total+=decimal_value(line.qty)*line.unit_price
+        total=money_value(total)
     if not total or total<=0: raise HTTPException(400,'Sales order total or line items are required')
     no='SO-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];order=SalesOrder(order_no=no,customer_id=customer.id,total=total);s.add(order);s.flush()
     for line in x.lines: s.add(SalesOrderLine(sales_order_id=order.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price))
@@ -326,19 +347,20 @@ def create_sales_delivery(x:SalesDeliveryIn,actor:User=Depends(require_roles('ad
     s.commit(); return {'delivery_no':no,'sales_order_id':order.id,'warehouse_id':warehouse.id,'status':'posted'}
 
 @app.get('/api/purchase-orders')
-def purchase_orders(_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
+def purchase_orders(user:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     def creator_for(po):
         entry=s.query(AuditLog).filter_by(entity_type='purchase_order',entity_id=po.id,action='create').order_by(AuditLog.id.asc()).first()
         user=s.get(User,entry.actor_id) if entry else None
         return user.username if user else '—'
-    return [{'id':p.id,'po_no':p.po_no,'supplier':s.get(Party,p.supplier_id).name,'status':p.status,'total':p.total,'created_at':p.created_at.isoformat(),'created_by':creator_for(p)} for p in s.query(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(100)]
+    return [{'id':p.id,'po_no':p.po_no,'supplier':s.get(Party,p.supplier_id).name,'status':p.status,'total':p.total if user.role in ('admin','accountant') else None,'created_at':p.created_at.isoformat(),'created_by':creator_for(p)} for p in s.query(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(100)]
 
 @app.get('/api/purchase-orders/{po_id}')
-def purchase_order_detail(po_id:int,_:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
+def purchase_order_detail(po_id:int,user:User=Depends(require_roles('admin','accountant','inventory')),s:Session=Depends(db)):
     po=s.get(PurchaseOrder,po_id)
     if not po: raise HTTPException(404,'Purchase order not found')
     lines=s.query(PurchaseOrderLine).filter_by(purchase_order_id=po.id).all()
-    return {'id':po.id,'po_no':po.po_no,'supplier':s.get(Party,po.supplier_id).name,'status':po.status,'total':po.total,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price,'line_total':round(line.qty*line.unit_price,2)} for line in lines]}
+    finance=user.role in ('admin','accountant')
+    return {'id':po.id,'po_no':po.po_no,'supplier':s.get(Party,po.supplier_id).name,'status':po.status,'total':po.total if finance else None,'lines':[{'product_id':line.product_id,'sku':s.get(Product,line.product_id).sku,'product':s.get(Product,line.product_id).name,'qty':line.qty,'unit_price':line.unit_price if finance else None,'line_total':money_value(decimal_value(line.qty)*decimal_value(line.unit_price)) if finance else None} for line in lines]}
 
 @app.post('/api/purchase-orders')
 def create_purchase_order(x:PurchaseOrderIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -346,10 +368,11 @@ def create_purchase_order(x:PurchaseOrderIn,actor:User=Depends(require_roles('ad
     if not supplier or supplier.kind!='supplier': raise HTTPException(400,'Invalid supplier')
     total=x.total
     if x.lines:
-        total=0
+        total=ZERO
         for line in x.lines:
             if not s.get(Product,line.product_id): raise HTTPException(400,'Invalid product on purchase order')
-            total+=line.qty*line.unit_price
+            total+=decimal_value(line.qty)*line.unit_price
+        total=money_value(total)
     if not total or total<=0: raise HTTPException(400,'Purchase order total or line items are required')
     no='PO-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];po=PurchaseOrder(po_no=no,supplier_id=supplier.id,total=total);s.add(po);s.flush()
     for line in x.lines: s.add(PurchaseOrderLine(purchase_order_id=po.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price))
@@ -398,20 +421,24 @@ def update_user(user_id:int,x:UserUpdateIn,actor:User=Depends(require_roles('adm
     s.commit(); return {'id':user.id,'username':user.username,'role':user.role,'active':user.active}
 
 @app.get('/api/dashboard')
-def dashboard(_:User=Depends(current_user),s:Session=Depends(db)):
-    products=s.query(Product).all(); stock=s.query(Stock).all(); inventory_value=sum(x.qty*next((p.cost for p in products if p.id==x.product_id),0) for x in stock)
+def dashboard(user:User=Depends(current_user),s:Session=Depends(db)):
+    products=s.query(Product).all(); stock=s.query(Stock).all(); inventory_value=sum((decimal_value(x.qty)*decimal_value(next((p.cost for p in products if p.id==x.product_id),ZERO)) for x in stock),ZERO)
     low=[]
     for p in products:
         q=sum(x.qty for x in stock if x.product_id==p.id)
         if q<=p.reorder_level: low.append({'sku':p.sku,'name':p.name,'qty':q,'reorder_level':p.reorder_level})
-    sales=sum(i.total for i in s.query(Invoice).filter_by(kind='sale',status='posted').all()); purchases=sum(i.total for i in s.query(Invoice).filter_by(kind='purchase',status='posted').all())
-    return {'inventory_value':round(inventory_value,2),'sales':round(sales,2),'purchases':round(purchases,2),'products':len(products),'low_stock':low,'customers':s.query(Party).filter_by(kind='customer').count(),'suppliers':s.query(Party).filter_by(kind='supplier').count(),'productions':s.query(Production).count(),'workflow_pending':s.query(Invoice).filter(Invoice.status.in_(['submitted','approved'])).count()}
+    response={'products':len(products),'low_stock':low,'productions':s.query(Production).count()}
+    if user.role in ('admin','accountant'):
+        sales=sum((decimal_value(i.total) for i in s.query(Invoice).filter_by(kind='sale',status='posted').all()),ZERO)
+        purchases=sum((decimal_value(i.total) for i in s.query(Invoice).filter_by(kind='purchase',status='posted').all()),ZERO)
+        response.update({'inventory_value':money_value(inventory_value),'sales':money_value(sales),'purchases':money_value(purchases),'customers':s.query(Party).filter_by(kind='customer').count(),'suppliers':s.query(Party).filter_by(kind='supplier').count(),'workflow_pending':s.query(Invoice).filter(Invoice.status.in_(['submitted','approved'])).count()})
+    return response
 @app.get('/api/accounts')
-def accounts(_:User=Depends(current_user),s:Session=Depends(db)): return [{'id':a.id,'code':a.code,'name':a.name,'type':a.type} for a in s.query(Account).order_by(Account.code)]
+def accounts(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)): return [{'id':a.id,'code':a.code,'name':a.name,'type':a.type} for a in s.query(Account).order_by(Account.code)]
 @app.get('/api/products')
-def products(_:User=Depends(current_user),s:Session=Depends(db)):
+def products(user:User=Depends(current_user),s:Session=Depends(db)):
     out=[]
-    for p in s.query(Product).order_by(Product.sku): out.append({'id':p.id,'sku':p.sku,'name':p.name,'category':p.category,'unit':p.unit,'cost':p.cost,'sale_price':p.sale_price,'qty':sum(x.qty for x in s.query(Stock).filter_by(product_id=p.id)),'reorder_level':p.reorder_level})
+    for p in s.query(Product).order_by(Product.sku): out.append({'id':p.id,'sku':p.sku,'name':p.name,'category':p.category,'unit':p.unit,'cost':p.cost if user.role in ('admin','accountant') else None,'sale_price':p.sale_price if user.role in ('admin','accountant') else None,'qty':sum(x.qty for x in s.query(Stock).filter_by(product_id=p.id)),'reorder_level':p.reorder_level})
     return out
 @app.post('/api/products')
 def add_product(x:ProductIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
@@ -496,35 +523,21 @@ def stock_adjustment(x:StockAdjustmentIn,actor:User=Depends(require_roles('admin
 
 @app.post('/api/invoices')
 def create_invoice(x:InvoiceIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
+    if x.post_now: raise HTTPException(400,'Immediate posting is disabled. Create a draft, then submit, approve, and post it independently.')
     if x.kind not in ('purchase','sale'): raise HTTPException(400,'kind must be purchase or sale')
     party=s.get(Party,x.party_id); wh=s.get(Warehouse,x.warehouse_id)
     expected='supplier' if x.kind=='purchase' else 'customer'
     if not party or not wh or party.kind!=expected: raise HTTPException(400,'Invalid party or warehouse')
-    subtotal=sum(l.qty*l.unit_price for l in x.lines); tax=subtotal*(x.tax_rate/100); total=subtotal+tax
+    subtotal=money_value(sum((decimal_value(l.qty)*l.unit_price for l in x.lines),ZERO)); tax=money_value(subtotal*(x.tax_rate/Decimal('100'))); total=money_value(subtotal+tax)
+    if subtotal<=ZERO: raise HTTPException(400,'Invoice subtotal must be greater than zero')
     prefix='PINV' if x.kind=='purchase' else 'SINV'; no=f'{prefix}-{datetime.utcnow().strftime("%Y%m%d%H%M%S%f")[:17]}'
-    inv=Invoice(invoice_no=no,kind=x.kind,party_id=x.party_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax,total=total,status='posted' if x.post_now else 'draft'); s.add(inv); s.flush()
-    if not x.post_now:
-        for l in x.lines:
-            if not s.get(Product,l.product_id): raise HTTPException(404,'Product not found')
-            s.add(InvoiceLine(invoice_id=inv.id,product_id=l.product_id,qty=l.qty,unit_price=l.unit_price,line_total=l.qty*l.unit_price))
-        audit(s,actor,'create_draft','invoice',inv.id,f'Invoice {inv.invoice_no}; {inv.kind}')
-        s.commit(); return {'id':inv.id,'invoice_no':inv.invoice_no,'total':total,'tax':tax,'status':inv.status}
-    inv_acct=acct(s,'1300'); party_acct=acct(s,'2000' if x.kind=='purchase' else '1200'); vat=acct(s,'1350' if x.kind=='purchase' else '2100'); main=acct(s,'5100' if x.kind=='purchase' else '4000')
-    lines=[]; cogs=0
+    inv=Invoice(invoice_no=no,kind=x.kind,party_id=x.party_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax,total=total,status='draft',created_by_id=actor.id); s.add(inv); s.flush()
     for l in x.lines:
         p=s.get(Product,l.product_id)
         if not p: raise HTTPException(404,'Product not found')
-        lines.append(InvoiceLine(invoice_id=inv.id,product_id=p.id,qty=l.qty,unit_price=l.unit_price,line_total=l.qty*l.unit_price))
-        if x.kind=='purchase': move(s,p.id,wh.id,l.qty,'IN','purchase',no)
-        else:
-            move(s,p.id,wh.id,l.qty,'OUT','sale',no); cogs += l.qty*p.cost
-        s.add(lines[-1])
-    if x.kind=='purchase':
-        j=journal(s,f'Purchase {no}',[(inv_acct,subtotal,0),(vat,tax,0),(party_acct,0,total)])
-    else:
-        j=journal(s,f'Sale {no}',[(party_acct,total,0),(main,0,subtotal),(vat,0,tax),(acct(s,'5000'),cogs,0),(inv_acct,0,cogs)])
-    audit(s,actor,'post','invoice',inv.id,f'{x.kind} {no}')
-    s.commit(); return {'invoice_no':no,'subtotal':subtotal,'tax':tax,'total':total,'journal_no':j.entry_no}
+        s.add(InvoiceLine(invoice_id=inv.id,product_id=p.id,qty=l.qty,unit_price=l.unit_price,line_total=money_value(decimal_value(l.qty)*l.unit_price)))
+    audit(s,actor,'create_draft','invoice',inv.id,f'Invoice {inv.invoice_no}; {inv.kind}')
+    s.commit(); return {'id':inv.id,'invoice_no':inv.invoice_no,'total':total,'tax':tax,'status':inv.status}
 
 @app.post('/api/invoices/{invoice_id}/workflow')
 def invoice_workflow(invoice_id:int,x:InvoiceWorkflowIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -533,8 +546,7 @@ def invoice_workflow(invoice_id:int,x:InvoiceWorkflowIn,actor:User=Depends(requi
     allowed={'draft':{'submit':'submitted','cancel':'cancelled'},'submitted':{'approve':'approved','return':'draft','cancel':'cancelled'},'approved':{'return':'draft','cancel':'cancelled'}}
     target=allowed.get(inv.status,{}).get(x.action)
     if not target: raise HTTPException(400,f'Action {x.action} is not allowed while invoice is {inv.status}')
-    creator=s.query(AuditLog).filter(AuditLog.entity_type=='invoice',AuditLog.entity_id==inv.id,AuditLog.action.in_(['create','create_draft'])).order_by(AuditLog.id.asc()).first()
-    if x.action=='approve' and creator and creator.actor_id==actor.id: raise HTTPException(403,'Invoice creator cannot approve the same invoice')
+    if x.action=='approve': require_independent_invoice_actor(inv,actor,'approve')
     inv.status=target; audit(s,actor,'workflow_'+x.action,'invoice',inv.id,f'Invoice {inv.invoice_no}; status {target}'); s.commit()
     return {'id':inv.id,'invoice_no':inv.invoice_no,'status':inv.status}
 
@@ -543,20 +555,26 @@ def post_approved_invoice(invoice_id:int,actor:User=Depends(require_roles('admin
     inv=s.get(Invoice,invoice_id)
     if not inv: raise HTTPException(404,'Invoice not found')
     if inv.status!='approved': raise HTTPException(400,'Only an approved invoice can be posted')
-    creator=s.query(AuditLog).filter(AuditLog.entity_type=='invoice',AuditLog.entity_id==inv.id,AuditLog.action.in_(['create','create_draft'])).order_by(AuditLog.id.asc()).first()
-    if creator and creator.actor_id==actor.id: raise HTTPException(403,'Invoice creator cannot post the same invoice')
+    require_independent_invoice_actor(inv,actor,'post')
     wh=s.get(Warehouse,inv.warehouse_id)
     inv_acct=acct(s,'1300'); party_acct=acct(s,'2000' if inv.kind=='purchase' else '1200'); vat=acct(s,'1350' if inv.kind=='purchase' else '2100'); main=acct(s,'5100' if inv.kind=='purchase' else '4000')
-    cogs=0
+    cogs=ZERO
     for line in s.query(InvoiceLine).filter_by(invoice_id=inv.id):
         product=s.get(Product,line.product_id)
         if not product: raise HTTPException(404,'Product not found')
-        if inv.kind=='purchase': move(s,product.id,wh.id,line.qty,'IN','purchase',inv.invoice_no)
+        if inv.kind=='purchase':
+            converted=s.query(PurchaseOrderConversion).filter_by(invoice_id=inv.id).first()
+            if converted:
+                receipt=s.query(PurchaseReceipt).filter_by(purchase_order_id=converted.purchase_order_id,status='posted').first()
+                if not receipt: raise HTTPException(400,'Purchase-order invoice requires a goods receipt before posting')
+                if receipt.warehouse_id!=inv.warehouse_id: raise HTTPException(400,'Invoice warehouse must match the goods receipt warehouse')
+            else:
+                move(s,product.id,wh.id,line.qty,'IN','purchase',inv.invoice_no)
         else:
             delivered=s.query(SalesOrderConversion).filter_by(invoice_id=inv.id).first()
             if delivered and not s.query(SalesDelivery).filter_by(sales_order_id=delivered.sales_order_id).first(): raise HTTPException(400,'Sales-order invoice requires a delivery record before posting')
             if not delivered: move(s,product.id,wh.id,line.qty,'OUT','sale',inv.invoice_no)
-            cogs += line.qty*product.cost
+            cogs += decimal_value(line.qty)*decimal_value(product.cost)
     if inv.kind=='purchase':
         j=journal(s,f'Purchase {inv.invoice_no}',[(inv_acct,inv.subtotal,0),(vat,inv.tax_amount,0),(party_acct,0,inv.total)])
     else:
@@ -565,19 +583,19 @@ def post_approved_invoice(invoice_id:int,actor:User=Depends(require_roles('admin
     s.commit(); return {'invoice_no':inv.invoice_no,'status':inv.status,'journal_no':j.entry_no}
 
 @app.get('/api/invoices')
-def invoices(_:User=Depends(current_user),s:Session=Depends(db)):
+def invoices(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     quote_sources={c.invoice_id:s.get(SalesQuotation,c.quotation_id).quote_no for c in s.query(SalesQuotationConversion).all()}
     po_sources={c.invoice_id:s.get(PurchaseOrder,c.purchase_order_id).po_no for c in s.query(PurchaseOrderConversion).all()}
     order_sources={c.invoice_id:s.get(SalesOrder,c.sales_order_id).order_no for c in s.query(SalesOrderConversion).all()}
     out=[]
     for i in s.query(Invoice).order_by(Invoice.id.desc()).limit(100):
         p=s.get(Party,i.party_id); source=quote_sources.get(i.id) or po_sources.get(i.id) or order_sources.get(i.id) or ''
-        creation=s.query(AuditLog).filter_by(entity_type='invoice',entity_id=i.id,action='create').order_by(AuditLog.id.asc()).first(); creator=s.get(User,creation.actor_id).username if creation and s.get(User,creation.actor_id) else ''
+        creator_user=s.get(User,i.created_by_id) if i.created_by_id else None; creator=creator_user.username if creator_user else ''
         out.append({'id':i.id,'invoice_no':i.invoice_no,'kind':i.kind,'party':p.name if p else '?','subtotal':i.subtotal,'tax':i.tax_amount,'total':i.total,'status':i.status,'source_document':source,'created_by':creator,'created_at':i.created_at.isoformat()})
     return out
 
 @app.get('/api/invoices/{invoice_id}')
-def invoice_detail(invoice_id:int,_:User=Depends(current_user),s:Session=Depends(db)):
+def invoice_detail(invoice_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     invoice=s.get(Invoice,invoice_id)
     if not invoice: raise HTTPException(404,'Invoice not found')
     lines=s.query(InvoiceLine).filter_by(invoice_id=invoice.id).all()
@@ -602,28 +620,28 @@ def create_bom(x:BOMIn,actor:User=Depends(require_roles('admin','inventory')),s:
     audit(s,actor,'create','bom',b.id,f'Product {b.product_id}')
     s.commit(); return {'id':b.id}
 @app.get('/api/productions')
-def productions(_:User=Depends(current_user),s:Session=Depends(db)):
+def productions(user:User=Depends(current_user),s:Session=Depends(db)):
     out=[]
     for p in s.query(Production).order_by(Production.id.desc()).limit(100):
-        b=s.get(BOM,p.bom_id); fg=s.get(Product,b.product_id); w=s.get(Warehouse,p.warehouse_id); out.append({'production_no':p.production_no,'product':fg.name,'sku':fg.sku,'qty':p.qty,'warehouse':w.name,'total_cost':p.total_cost,'status':p.status,'created_at':p.created_at.isoformat()})
+        b=s.get(BOM,p.bom_id); fg=s.get(Product,b.product_id); w=s.get(Warehouse,p.warehouse_id); out.append({'production_no':p.production_no,'product':fg.name,'sku':fg.sku,'qty':p.qty,'warehouse':w.name,'total_cost':p.total_cost if user.role in ('admin','accountant') else None,'status':p.status,'created_at':p.created_at.isoformat()})
     return out
 @app.post('/api/productions')
 def create_production(x:ProductionIn,actor:User=Depends(require_roles('admin','inventory')),s:Session=Depends(db)):
     b=s.get(BOM,x.bom_id); w=s.get(Warehouse,x.warehouse_id)
     if not b or not w: raise HTTPException(404,'BOM or warehouse not found')
     fg=s.get(Product,b.product_id); no='PROD-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
-    factor=x.qty/b.quantity; total=0
+    factor=x.qty/b.quantity; total=ZERO
     requirements=[]
     for l in s.query(BOMLine).filter_by(bom_id=b.id):
         cp=s.get(Product,l.component_id); req=l.qty*factor; st=stock_row(s,cp.id,w.id)
         if st.qty<req: raise HTTPException(400,f'Insufficient {cp.name}: available {st.qty}, required {req}')
-        requirements.append((cp,req)); total += req*cp.cost
+        requirements.append((cp,req)); total += decimal_value(req)*decimal_value(cp.cost)
     for cp,req in requirements: move(s,cp.id,w.id,req,'OUT','production',no)
     move(s,fg.id,w.id,x.qty,'IN','production',no)
-    fg.cost = total/x.qty if x.qty else fg.cost
+    total=money_value(total); fg.cost = money_value(total/decimal_value(x.qty)) if x.qty else fg.cost
     p=Production(production_no=no,bom_id=b.id,warehouse_id=w.id,qty=x.qty,total_cost=total); s.add(p); s.flush()
     lines=[(acct(s,'1300'),total,0),(acct(s,'1300'),0,total)]
-    j=journal(s,f'Production {no}',lines); audit(s,actor,'post','production',p.id,no); s.commit(); return {'production_no':no,'total_cost':total,'unit_cost':total/x.qty}
+    j=journal(s,f'Production {no}',lines); audit(s,actor,'post','production',p.id,no); s.commit(); finance=actor.role in ('admin','accountant'); return {'production_no':no,'total_cost':total if finance else None,'unit_cost':money_value(total/decimal_value(x.qty)) if finance else None}
 
 
 @app.get('/api/purchase-receipts')
@@ -656,7 +674,8 @@ def payments(_:User=Depends(require_roles('admin','accountant')),s:Session=Depen
     out=[]
     for payment in s.query(Payment).order_by(Payment.id.desc()).limit(100):
         party=s.get(Party,payment.party_id); account=s.get(Account,payment.account_id)
-        out.append({'id':payment.id,'payment_no':payment.payment_no,'kind':payment.kind,'party_id':payment.party_id,'party':party.name if party else '?','amount':payment.amount,'allocated':round(sum(a.amount for a in s.query(PaymentAllocation).filter_by(payment_id=payment.id)),2),'account':account.code+' - '+account.name if account else '?','created_at':payment.created_at.isoformat()})
+        allocated=sum((decimal_value(a.amount) for a in s.query(PaymentAllocation).filter_by(payment_id=payment.id,active=True)),ZERO)
+        out.append({'id':payment.id,'payment_no':payment.payment_no,'kind':payment.kind,'party_id':payment.party_id,'party':party.name if party else '?','amount':payment.amount,'allocated':money_value(allocated),'status':payment.status,'voided_at':payment.voided_at.isoformat() if payment.voided_at else None,'account':account.code+' - '+account.name if account else '?','created_at':payment.created_at.isoformat()})
     return out
 
 @app.post('/api/payments')
@@ -665,9 +684,9 @@ def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','account
     party=s.get(Party,x.party_id); bank=acct(s,x.account_code)
     if not party or (x.kind=='receipt' and party.kind!='customer') or (x.kind=='payment' and party.kind!='supplier'): raise HTTPException(400,'Invalid party for payment')
     invoice_kind='sale' if x.kind=='receipt' else 'purchase'
-    posted_total=sum(inv.total for inv in s.query(Invoice).filter_by(party_id=party.id,kind=invoice_kind,status='posted'))
-    prior_paid=sum(p.amount for p in s.query(Payment).filter_by(party_id=party.id,kind=x.kind))
-    if x.amount > round(posted_total-prior_paid,2)+0.0001: raise HTTPException(400,'Payment exceeds the party open balance; allocate or reconcile earlier payments first')
+    posted_total=sum((decimal_value(inv.total) for inv in s.query(Invoice).filter_by(party_id=party.id,kind=invoice_kind,status='posted')),ZERO)
+    prior_paid=sum((decimal_value(p.amount) for p in s.query(Payment).filter_by(party_id=party.id,kind=x.kind,status='posted')),ZERO)
+    if x.amount > money_value(posted_total-prior_paid)+EPSILON: raise HTTPException(400,'Payment exceeds the party open balance; allocate or reconcile earlier payments first')
     no='PAY-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]
     party_acct=acct(s,'1200' if x.kind=='receipt' else '2000')
     j=journal(s,f'{x.kind.title()} {no}',[(bank,x.amount,0),(party_acct,0,x.amount)] if x.kind=='receipt' else [(party_acct,x.amount,0),(bank,0,x.amount)])
@@ -675,8 +694,8 @@ def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','account
     if x.invoice_id is not None:
         inv=s.get(Invoice,x.invoice_id); expected='sale' if x.kind=='receipt' else 'purchase'
         if not inv or inv.status!='posted' or inv.party_id!=party.id or inv.kind!=expected: raise HTTPException(400,'Invalid invoice for this payment')
-        allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id))
-        if x.amount>round(inv.total-allocated,2)+0.0001: raise HTTPException(400,'Payment exceeds invoice balance')
+        allocated=sum((decimal_value(a.amount) for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id,active=True)),ZERO)
+        if x.amount>money_value(decimal_value(inv.total)-allocated)+EPSILON: raise HTTPException(400,'Payment exceeds invoice balance')
         s.add(PaymentAllocation(payment_id=payment.id,invoice_id=inv.id,amount=x.amount))
     audit(s,actor,'post','payment',payment.id,no); s.commit(); return {'payment_no':no,'journal_no':j.entry_no}
 
@@ -684,11 +703,12 @@ def create_payment(x:PaymentIn,actor:User=Depends(require_roles('admin','account
 def allocate_payment(payment_id:int,x:AllocationIn,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     payment=s.get(Payment,payment_id); inv=s.get(Invoice,x.invoice_id)
     if not payment or not inv or inv.status!='posted': raise HTTPException(400,'Invalid payment or invoice')
+    if payment.status!='posted': raise HTTPException(400,'Only posted payments can be allocated')
     expected='sale' if payment.kind=='receipt' else 'purchase'
     if inv.kind!=expected or inv.party_id!=payment.party_id: raise HTTPException(400,'Payment and invoice must belong to the same party')
-    allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(payment_id=payment.id))
-    invoice_allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id))
-    if x.amount>round(payment.amount-allocated,2)+0.0001 or x.amount>round(inv.total-invoice_allocated,2)+0.0001: raise HTTPException(400,'Allocation exceeds available balance')
+    allocated=sum((decimal_value(a.amount) for a in s.query(PaymentAllocation).filter_by(payment_id=payment.id,active=True)),ZERO)
+    invoice_allocated=sum((decimal_value(a.amount) for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id,active=True)),ZERO)
+    if x.amount>money_value(decimal_value(payment.amount)-allocated)+EPSILON or x.amount>money_value(decimal_value(inv.total)-invoice_allocated)+EPSILON: raise HTTPException(400,'Allocation exceeds available balance')
     allocation=PaymentAllocation(payment_id=payment.id,invoice_id=inv.id,amount=x.amount);s.add(allocation);s.flush()
     audit(s,actor,'allocate','payment',payment.id,f'{payment.payment_no}; {inv.invoice_no}; {x.amount}');s.commit()
     return {'status':'allocated','amount':x.amount}
@@ -698,49 +718,52 @@ def reconciliation(_:User=Depends(require_roles('admin','accountant')),s:Session
     rows=[]
     for inv in s.query(Invoice).filter_by(status='posted').order_by(Invoice.id.desc()).limit(100):
         party=s.get(Party,inv.party_id)
-        allocations=s.query(PaymentAllocation).filter_by(invoice_id=inv.id).all()
-        allocated=round(sum(a.amount for a in allocations),2)
+        allocations=s.query(PaymentAllocation).filter_by(invoice_id=inv.id,active=True).all()
+        allocated=money_value(sum((decimal_value(a.amount) for a in allocations),ZERO))
         details=[]
         for allocation in allocations:
             payment=s.get(Payment,allocation.payment_id)
             if payment: details.append({'payment_no':payment.payment_no,'amount':allocation.amount,'created_at':payment.created_at.isoformat()})
-        rows.append({'id':inv.id,'party_id':inv.party_id,'invoice_no':inv.invoice_no,'kind':inv.kind,'party':party.name if party else '?','total':inv.total,'allocated':allocated,'balance':round(inv.total-allocated,2),'status':'settled' if abs(inv.total-allocated)<0.0001 else 'open','payments':details})
+        balance=money_value(decimal_value(inv.total)-allocated)
+        rows.append({'id':inv.id,'party_id':inv.party_id,'invoice_no':inv.invoice_no,'kind':inv.kind,'party':party.name if party else '?','total':inv.total,'allocated':allocated,'balance':balance,'status':'settled' if abs(balance)<EPSILON else 'open','payments':details})
     return rows
 
 @app.get('/api/open-invoices')
 def open_invoices(kind:str,party_id:int,_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     expected='sale' if kind=='receipt' else 'purchase'; out=[]
     for inv in s.query(Invoice).filter_by(status='posted',party_id=party_id,kind=expected):
-        allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id)); balance=round(inv.total-allocated,2)
-        if balance>0.0001: out.append({'id':inv.id,'invoice_no':inv.invoice_no,'balance':balance})
+        allocated=sum((decimal_value(a.amount) for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id,active=True)),ZERO); balance=money_value(decimal_value(inv.total)-allocated)
+        if balance>EPSILON: out.append({'id':inv.id,'invoice_no':inv.invoice_no,'balance':balance})
     return out
 
 @app.post('/api/payments/{payment_id}/void')
 def void_payment(payment_id:int,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     payment=s.get(Payment,payment_id)
     if not payment: raise HTTPException(404,'Payment not found')
+    if payment.status=='voided': raise HTTPException(400,'Payment is already voided')
     payment_no=payment.payment_no
     bank=s.get(Account,payment.account_id); party_acct=acct(s,'1200' if payment.kind=='receipt' else '2000')
     lines=[(party_acct,payment.amount,0),(bank,0,payment.amount)] if payment.kind=='receipt' else [(bank,payment.amount,0),(party_acct,0,payment.amount)]
     j=journal(s,f'Void {payment.kind.title()} {payment.payment_no}',lines)
-    for allocation in s.query(PaymentAllocation).filter_by(payment_id=payment.id).all(): s.delete(allocation)
-    s.flush()
+    for allocation in s.query(PaymentAllocation).filter_by(payment_id=payment.id,active=True).all(): allocation.active=False
+    payment.status='voided'; payment.voided_at=datetime.utcnow(); payment.voided_by_id=actor.id; payment.reversal_journal_id=j.id
     audit(s,actor,'void','payment',payment.id,f'{payment_no}; reversal {j.entry_no}')
-    s.delete(payment); s.commit(); return {'payment_no':payment_no,'journal_no':j.entry_no,'status':'voided'}
+    s.commit(); return {'payment_no':payment_no,'journal_no':j.entry_no,'status':'voided'}
 
 
 @app.post('/api/payments/by-reference/{payment_no}/void')
 def void_payment_by_reference(payment_no:str,actor:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     payment=s.query(Payment).filter_by(payment_no=payment_no).first()
     if not payment: raise HTTPException(404,'Payment not found')
+    if payment.status=='voided': raise HTTPException(400,'Payment is already voided')
     payment_no=payment.payment_no
     bank=s.get(Account,payment.account_id); party_acct=acct(s,'1200' if payment.kind=='receipt' else '2000')
     lines=[(party_acct,payment.amount,0),(bank,0,payment.amount)] if payment.kind=='receipt' else [(bank,payment.amount,0),(party_acct,0,payment.amount)]
     j=journal(s,f'Void {payment.kind.title()} {payment.payment_no}',lines)
-    for allocation in s.query(PaymentAllocation).filter_by(payment_id=payment.id).all(): s.delete(allocation)
-    s.flush()
+    for allocation in s.query(PaymentAllocation).filter_by(payment_id=payment.id,active=True).all(): allocation.active=False
+    payment.status='voided'; payment.voided_at=datetime.utcnow(); payment.voided_by_id=actor.id; payment.reversal_journal_id=j.id
     audit(s,actor,'void','payment',payment.id,f'{payment_no}; reversal {j.entry_no}')
-    s.delete(payment); s.commit(); return {'payment_no':payment_no,'journal_no':j.entry_no,'status':'voided'}
+    s.commit(); return {'payment_no':payment_no,'journal_no':j.entry_no,'status':'voided'}
 
 @app.get('/api/audit-logs')
 def audit_logs(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
@@ -748,7 +771,7 @@ def audit_logs(_:User=Depends(require_roles('admin')),s:Session=Depends(db)):
     return [{'id':r.id,'actor_id':r.actor_id,'action':r.action,'entity_type':r.entity_type,'entity_id':r.entity_id,'detail':r.detail,'created_at':r.created_at.isoformat()} for r in rows]
 
 @app.get('/api/journals')
-def journals(_:User=Depends(current_user),s:Session=Depends(db)):
+def journals(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     out=[]
     for j in s.query(Journal).order_by(Journal.id.desc()).limit(100):
         ls=[]
@@ -760,18 +783,18 @@ def journals(_:User=Depends(current_user),s:Session=Depends(db)):
 def aging_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     customers=suppliers=0
     for inv in s.query(Invoice).filter_by(status='posted'):
-        allocated=sum(a.amount for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id))
-        balance=inv.total-allocated
-        if balance>0.0001:
+        allocated=sum((decimal_value(a.amount) for a in s.query(PaymentAllocation).filter_by(invoice_id=inv.id,active=True)),ZERO)
+        balance=decimal_value(inv.total)-allocated
+        if balance>EPSILON:
             if inv.kind=='sale': customers+=balance
             else: suppliers+=balance
     return {'customer_open':round(customers,2),'supplier_open':round(suppliers,2)}
 
 @app.get('/api/cash-summary')
 def cash_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
-    receipts=sum(p.amount for p in s.query(Payment).filter_by(kind='receipt'))
-    payments=sum(p.amount for p in s.query(Payment).filter_by(kind='payment'))
-    return {'receipts':round(receipts,2),'payments':round(payments,2),'net_cash_flow':round(receipts-payments,2)}
+    receipts=sum((decimal_value(p.amount) for p in s.query(Payment).filter_by(kind='receipt',status='posted')),ZERO)
+    payments=sum((decimal_value(p.amount) for p in s.query(Payment).filter_by(kind='payment',status='posted')),ZERO)
+    return {'receipts':money_value(receipts),'payments':money_value(payments),'net_cash_flow':money_value(receipts-payments)}
 
 @app.get('/api/operations-summary')
 def operations_summary(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
@@ -794,7 +817,7 @@ def financial_summary(_:User=Depends(require_roles('admin','accountant')),s:Sess
     return {'revenue':revenue,'expenses':expenses,'net_profit':round(revenue-expenses,2),'assets':assets,'liabilities':liabilities,'equity':equity,'cash':balances.get('1000',{}).get('net',0),'receivables':balances.get('1200',{}).get('net',0),'payables':round(-balances.get('2000',{}).get('net',0),2)}
 
 @app.get('/api/trial-balance')
-def trial_balance(_:User=Depends(current_user),s:Session=Depends(db)):
+def trial_balance(_:User=Depends(require_roles('admin','accountant')),s:Session=Depends(db)):
     rows=[]
     for a in s.query(Account).order_by(Account.code):
         d=sum(x.debit for x in s.query(JournalLine).filter_by(account_id=a.id)); c=sum(x.credit for x in s.query(JournalLine).filter_by(account_id=a.id))
@@ -806,7 +829,7 @@ def health(s:Session=Depends(db)):
         s.execute(text('SELECT 1'))
     except Exception:
         raise HTTPException(503, 'Database is unavailable')
-    return {'status':'ok','database':'connected','version':'0.2.0'}
+    return {'status':'ok','database':'connected','version':APP_VERSION}
 
 
 @app.get('/api/commercial-pipeline')
@@ -826,10 +849,10 @@ def convert_sales_quotation(quote_id:int,x:QuotationConvertIn,actor:User=Depends
     if not s.get(Warehouse,x.warehouse_id): raise HTTPException(400,'Invalid warehouse')
     lines=s.query(SalesQuotationLine).filter_by(quotation_id=q.id).all()
     if not lines: raise HTTPException(400,'Quotation requires product lines before conversion')
-    subtotal=round(sum(line.qty*line.unit_price for line in lines),2); tax_amount=round(subtotal*x.tax_rate/100,2); total=round(subtotal+tax_amount,2)
-    no='S-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; invoice=Invoice(invoice_no=no,kind='sale',party_id=q.customer_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
-    for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
-    s.add(SalesQuotationConversion(quotation_id=q.id,invoice_id=invoice.id));audit(s,actor,'convert','sales_quotation',q.id,f'{q.quote_no} to draft {no}');s.commit()
+    subtotal=money_value(sum((decimal_value(line.qty)*decimal_value(line.unit_price) for line in lines),ZERO)); tax_amount=money_value(subtotal*x.tax_rate/Decimal('100')); total=money_value(subtotal+tax_amount)
+    no='S-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; invoice=Invoice(invoice_no=no,kind='sale',party_id=q.customer_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft',created_by_id=actor.id,source_type='sales_quotation',source_id=q.id);s.add(invoice);s.flush()
+    for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=money_value(decimal_value(line.qty)*decimal_value(line.unit_price))))
+    s.add(SalesQuotationConversion(quotation_id=q.id,invoice_id=invoice.id));audit(s,actor,'create_draft','invoice',invoice.id,f'Invoice {no}; source {q.quote_no}');audit(s,actor,'convert','sales_quotation',q.id,f'{q.quote_no} to draft {no}');s.commit()
     return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
 
 
@@ -841,10 +864,10 @@ def convert_sales_order(order_id:int,x:QuotationConvertIn,actor:User=Depends(req
     if not s.get(Warehouse,x.warehouse_id): raise HTTPException(400,'Invalid warehouse')
     lines=s.query(SalesOrderLine).filter_by(sales_order_id=order.id).all()
     if not lines: raise HTTPException(400,'Sales order requires product lines before conversion')
-    subtotal=round(sum(line.qty*line.unit_price for line in lines),2); tax_amount=round(subtotal*x.tax_rate/100,2); total=round(subtotal+tax_amount,2)
-    no='S-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; invoice=Invoice(invoice_no=no,kind='sale',party_id=order.customer_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
-    for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
-    s.add(SalesOrderConversion(sales_order_id=order.id,invoice_id=invoice.id));audit(s,actor,'convert','sales_order',order.id,f'{order.order_no} to draft {no}');s.commit()
+    subtotal=money_value(sum((decimal_value(line.qty)*decimal_value(line.unit_price) for line in lines),ZERO)); tax_amount=money_value(subtotal*x.tax_rate/Decimal('100')); total=money_value(subtotal+tax_amount)
+    no='S-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18]; invoice=Invoice(invoice_no=no,kind='sale',party_id=order.customer_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft',created_by_id=actor.id,source_type='sales_order',source_id=order.id);s.add(invoice);s.flush()
+    for line in lines: s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=money_value(decimal_value(line.qty)*decimal_value(line.unit_price))))
+    s.add(SalesOrderConversion(sales_order_id=order.id,invoice_id=invoice.id));audit(s,actor,'create_draft','invoice',invoice.id,f'Invoice {no}; source {order.order_no}');audit(s,actor,'convert','sales_order',order.id,f'{order.order_no} to draft {no}');s.commit()
     return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
 
 
@@ -856,16 +879,10 @@ def convert_purchase_order(po_id:int,x:QuotationConvertIn,actor:User=Depends(req
     if not s.get(Warehouse,x.warehouse_id): raise HTTPException(400,'Invalid warehouse')
     lines=s.query(PurchaseOrderLine).filter_by(purchase_order_id=po.id).all()
     if not lines: raise HTTPException(400,'Purchase order requires product lines before conversion')
-    subtotal=round(sum(line.qty*line.unit_price for line in lines),2); tax_amount=round(subtotal*x.tax_rate/100,2); total=round(subtotal+tax_amount,2)
-    no='P-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];invoice=Invoice(invoice_no=no,kind='purchase',party_id=po.supplier_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft');s.add(invoice);s.flush()
-    for line in lines:s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=round(line.qty*line.unit_price,2)))
-    s.add(PurchaseOrderConversion(purchase_order_id=po.id,invoice_id=invoice.id));audit(s,actor,'convert','purchase_order',po.id,f'{po.po_no} to draft {no}');s.commit();return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
-
-
-@app.get('/api/health')
-def health(s:Session=Depends(db)):
-    s.execute(text('SELECT 1'))
-    return {'status':'ok','database':'connected'}
+    subtotal=money_value(sum((decimal_value(line.qty)*decimal_value(line.unit_price) for line in lines),ZERO)); tax_amount=money_value(subtotal*x.tax_rate/Decimal('100')); total=money_value(subtotal+tax_amount)
+    no='P-'+datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:18];invoice=Invoice(invoice_no=no,kind='purchase',party_id=po.supplier_id,warehouse_id=x.warehouse_id,subtotal=subtotal,tax_rate=x.tax_rate,tax_amount=tax_amount,total=total,status='draft',created_by_id=actor.id,source_type='purchase_order',source_id=po.id);s.add(invoice);s.flush()
+    for line in lines:s.add(InvoiceLine(invoice_id=invoice.id,product_id=line.product_id,qty=line.qty,unit_price=line.unit_price,line_total=money_value(decimal_value(line.qty)*decimal_value(line.unit_price))))
+    s.add(PurchaseOrderConversion(purchase_order_id=po.id,invoice_id=invoice.id));audit(s,actor,'create_draft','invoice',invoice.id,f'Invoice {no}; source {po.po_no}');audit(s,actor,'convert','purchase_order',po.id,f'{po.po_no} to draft {no}');s.commit();return {'invoice_id':invoice.id,'invoice_no':no,'status':'draft','total':total}
 
 
 @app.get('/api/system-checks')

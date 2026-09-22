@@ -2,6 +2,7 @@ import importlib
 import os
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -29,6 +30,20 @@ class SafetyWorkflowTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
+
+    def create_user_headers(self, username, role="accountant"):
+        created = self.client.post(
+            "/api/users",
+            json={"username": username, "password": "ReviewerTest1!", "role": role},
+            headers=self.headers,
+        )
+        created.raise_for_status()
+        login = self.client.post(
+            "/api/auth/login",
+            data={"username": username, "password": "ReviewerTest1!"},
+        )
+        login.raise_for_status()
+        return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
     def test_health_reports_connected_database(self):
         response = self.client.get("/api/health")
@@ -136,13 +151,13 @@ class SafetyWorkflowTests(unittest.TestCase):
         destination_id = warehouse.json()["id"]
 
         receipt = self.client.post(
-            "/api/invoices",
+            "/api/stock-adjustments",
             json={
-                "kind": "purchase",
-                "party_id": 1,
+                "product_id": 1,
                 "warehouse_id": 1,
-                "lines": [{"product_id": 1, "qty": 5, "unit_price": 10}],
-                "post_now": True,
+                "direction": "IN",
+                "qty": 5,
+                "reason": "Transfer test opening stock",
             },
             headers=self.headers,
         )
@@ -293,13 +308,13 @@ class SafetyWorkflowTests(unittest.TestCase):
         warehouse.raise_for_status()
         destination_id = warehouse.json()["id"]
         receipt = self.client.post(
-            "/api/invoices",
+            "/api/stock-adjustments",
             json={
-                "kind": "purchase",
-                "party_id": 1,
+                "product_id": 1,
                 "warehouse_id": 1,
-                "lines": [{"product_id": 1, "qty": 3, "unit_price": 10}],
-                "post_now": True,
+                "direction": "IN",
+                "qty": 3,
+                "reason": "Role transfer opening stock",
             },
             headers=self.headers,
         )
@@ -381,9 +396,16 @@ class SafetyWorkflowTests(unittest.TestCase):
             headers=self.headers,
         )
         added.raise_for_status()
+        balances = self.client.get("/api/stock-by-warehouse", headers=self.headers)
+        balances.raise_for_status()
+        available = next(
+            row["qty"]
+            for row in balances.json()
+            if row["product_id"] == 2 and row["warehouse_id"] == 1
+        )
         response = self.client.post(
             "/api/stock-adjustments",
-            json={"product_id": 2, "warehouse_id": 1, "direction": "OUT", "qty": 2, "reason": "Count correction"},
+            json={"product_id": 2, "warehouse_id": 1, "direction": "OUT", "qty": available + 1, "reason": "Count correction"},
             headers=self.headers,
         )
         self.assertEqual(response.status_code, 400)
@@ -567,6 +589,315 @@ class SafetyWorkflowTests(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_immediate_invoice_posting_is_rejected(self):
+        response = self.client.post(
+            "/api/invoices",
+            json={
+                "kind": "sale",
+                "party_id": 2,
+                "warehouse_id": 1,
+                "lines": [{"product_id": 1, "qty": 1, "unit_price": "10.00"}],
+                "post_now": True,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Immediate posting is disabled", response.json()["detail"])
+
+    def test_legacy_invoice_without_creator_identity_fails_closed(self):
+        with self.main.SessionLocal() as session:
+            invoice = self.main.Invoice(
+                invoice_no="LEGACY-CONTROL-1",
+                kind="sale",
+                party_id=2,
+                warehouse_id=1,
+                subtotal=Decimal("10.00"),
+                tax_rate=Decimal("0.00"),
+                tax_amount=Decimal("0.00"),
+                total=Decimal("10.00"),
+                status="submitted",
+                created_by_id=None,
+            )
+            session.add(invoice)
+            session.commit()
+            invoice_id = invoice.id
+        response = self.client.post(
+            f"/api/invoices/{invoice_id}/workflow",
+            json={"action": "approve"},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("creator identity is unavailable", response.json()["detail"])
+
+    def test_converted_invoice_preserves_creator_and_blocks_self_approval(self):
+        reviewer_headers = self.create_user_headers("conversionreviewer")
+        quotation = self.client.post(
+            "/api/sales-quotations",
+            json={
+                "customer_id": 2,
+                "lines": [{"product_id": 1, "qty": 1, "unit_price": "25.00"}],
+            },
+            headers=self.headers,
+        )
+        quotation.raise_for_status()
+        quotation_id = quotation.json()["id"]
+        self.client.post(
+            f"/api/sales-quotations/{quotation_id}/workflow",
+            json={"action": "submit"},
+            headers=self.headers,
+        ).raise_for_status()
+        self.client.post(
+            f"/api/sales-quotations/{quotation_id}/workflow",
+            json={"action": "approve"},
+            headers=reviewer_headers,
+        ).raise_for_status()
+        converted = self.client.post(
+            f"/api/sales-quotations/{quotation_id}/convert",
+            json={"warehouse_id": 1},
+            headers=reviewer_headers,
+        )
+        converted.raise_for_status()
+        invoice_id = converted.json()["invoice_id"]
+        self.client.post(
+            f"/api/invoices/{invoice_id}/workflow",
+            json={"action": "submit"},
+            headers=reviewer_headers,
+        ).raise_for_status()
+        blocked = self.client.post(
+            f"/api/invoices/{invoice_id}/workflow",
+            json={"action": "approve"},
+            headers=reviewer_headers,
+        )
+        self.assertEqual(blocked.status_code, 403)
+        invoices = self.client.get("/api/invoices", headers=self.headers)
+        invoices.raise_for_status()
+        row = next(item for item in invoices.json() if item["id"] == invoice_id)
+        self.assertEqual(row["created_by"], "conversionreviewer")
+
+    def test_purchase_receipt_is_the_stock_event_for_converted_po_invoice(self):
+        reviewer_headers = self.create_user_headers("pocontrolreviewer")
+        inventory_headers = self.create_user_headers("pocontroloperator", role="inventory")
+        order = self.client.post(
+            "/api/purchase-orders",
+            json={
+                "supplier_id": 1,
+                "lines": [{"product_id": 2, "qty": 2, "unit_price": "11.00"}],
+            },
+            headers=self.headers,
+        )
+        order.raise_for_status()
+        order_id = order.json()["id"]
+        self.client.post(
+            f"/api/purchase-orders/{order_id}/workflow",
+            json={"action": "submit"},
+            headers=self.headers,
+        ).raise_for_status()
+        self.client.post(
+            f"/api/purchase-orders/{order_id}/workflow",
+            json={"action": "approve"},
+            headers=reviewer_headers,
+        ).raise_for_status()
+        converted = self.client.post(
+            f"/api/purchase-orders/{order_id}/convert",
+            json={"warehouse_id": 1},
+            headers=reviewer_headers,
+        )
+        converted.raise_for_status()
+        invoice_id = converted.json()["invoice_id"]
+        self.client.post(
+            f"/api/invoices/{invoice_id}/workflow",
+            json={"action": "submit"},
+            headers=reviewer_headers,
+        ).raise_for_status()
+        self.client.post(
+            f"/api/invoices/{invoice_id}/workflow",
+            json={"action": "approve"},
+            headers=self.headers,
+        ).raise_for_status()
+        before = self.client.get("/api/stock-by-warehouse", headers=self.headers).json()
+        before_qty = next(row["qty"] for row in before if row["product_id"] == 2 and row["warehouse_id"] == 1)
+        missing_receipt = self.client.post(
+            f"/api/invoices/{invoice_id}/post",
+            headers=self.headers,
+        )
+        self.assertEqual(missing_receipt.status_code, 400)
+        self.assertIn("goods receipt", missing_receipt.json()["detail"])
+        receipt = self.client.post(
+            "/api/purchase-receipts",
+            json={"purchase_order_id": order_id, "warehouse_id": 1},
+            headers=inventory_headers,
+        )
+        receipt.raise_for_status()
+        after_receipt = self.client.get("/api/stock-by-warehouse", headers=self.headers).json()
+        receipt_qty = next(row["qty"] for row in after_receipt if row["product_id"] == 2 and row["warehouse_id"] == 1)
+        self.assertEqual(receipt_qty, before_qty + 2)
+        with self.main.SessionLocal() as session:
+            stored_receipt = session.query(self.main.PurchaseReceipt).filter_by(purchase_order_id=order_id).one()
+            stored_receipt.status = "cancelled"
+            session.commit()
+        cancelled_receipt = self.client.post(f"/api/invoices/{invoice_id}/post", headers=self.headers)
+        self.assertEqual(cancelled_receipt.status_code, 400)
+        with self.main.SessionLocal() as session:
+            stored_receipt = session.query(self.main.PurchaseReceipt).filter_by(purchase_order_id=order_id).one()
+            stored_receipt.status = "posted"
+            session.commit()
+        posted = self.client.post(f"/api/invoices/{invoice_id}/post", headers=self.headers)
+        posted.raise_for_status()
+        after_post = self.client.get("/api/stock-by-warehouse", headers=self.headers).json()
+        posted_qty = next(row["qty"] for row in after_post if row["product_id"] == 2 and row["warehouse_id"] == 1)
+        self.assertEqual(posted_qty, receipt_qty)
+
+    def test_inventory_role_cannot_read_financial_endpoints(self):
+        inventory_headers = self.create_user_headers("financialboundary", role="inventory")
+        draft = self.client.post(
+            "/api/invoices",
+            json={
+                "kind": "sale",
+                "party_id": 2,
+                "warehouse_id": 1,
+                "lines": [{"product_id": 1, "qty": 1, "unit_price": "12.00"}],
+            },
+            headers=self.headers,
+        )
+        draft.raise_for_status()
+        for path in (
+            "/api/accounts",
+            "/api/journals",
+            "/api/trial-balance",
+            "/api/invoices",
+            f"/api/invoices/{draft.json()['id']}",
+            "/api/financial-summary",
+            "/api/reconciliation",
+        ):
+            self.assertEqual(self.client.get(path, headers=inventory_headers).status_code, 403, path)
+        dashboard = self.client.get("/api/dashboard", headers=inventory_headers)
+        dashboard.raise_for_status()
+        self.assertNotIn("sales", dashboard.json())
+        self.assertNotIn("purchases", dashboard.json())
+        self.assertNotIn("inventory_value", dashboard.json())
+        products = self.client.get("/api/products", headers=inventory_headers)
+        products.raise_for_status()
+        self.assertTrue(all(row["cost"] is None and row["sale_price"] is None for row in products.json()))
+        purchase_orders = self.client.get("/api/purchase-orders", headers=inventory_headers)
+        purchase_orders.raise_for_status()
+        self.assertTrue(all(row["total"] is None for row in purchase_orders.json()))
+        sales_orders = self.client.get("/api/sales-orders", headers=inventory_headers)
+        sales_orders.raise_for_status()
+        self.assertTrue(all(row["total"] is None for row in sales_orders.json()))
+
+    def test_payment_void_retains_history_and_reopens_invoice(self):
+        reviewer_headers = self.create_user_headers("paymentreviewer")
+        self.client.post(
+            "/api/stock-adjustments",
+            json={
+                "product_id": 1,
+                "warehouse_id": 1,
+                "direction": "IN",
+                "qty": 1,
+                "reason": "Payment reversal test stock",
+            },
+            headers=self.headers,
+        ).raise_for_status()
+        draft = self.client.post(
+            "/api/invoices",
+            json={
+                "kind": "sale",
+                "party_id": 2,
+                "warehouse_id": 1,
+                "lines": [{"product_id": 1, "qty": 1, "unit_price": "30.00"}],
+                "tax_rate": "0.00",
+            },
+            headers=self.headers,
+        )
+        draft.raise_for_status()
+        invoice_id = draft.json()["id"]
+        self.client.post(
+            f"/api/invoices/{invoice_id}/workflow",
+            json={"action": "submit"},
+            headers=self.headers,
+        ).raise_for_status()
+        self.client.post(
+            f"/api/invoices/{invoice_id}/workflow",
+            json={"action": "approve"},
+            headers=reviewer_headers,
+        ).raise_for_status()
+        self.client.post(f"/api/invoices/{invoice_id}/post", headers=reviewer_headers).raise_for_status()
+        cash_before = self.client.get("/api/cash-summary", headers=self.headers).json()["receipts"]
+        payment = self.client.post(
+            "/api/payments",
+            json={
+                "kind": "receipt",
+                "party_id": 2,
+                "amount": "30.00",
+                "invoice_id": invoice_id,
+            },
+            headers=self.headers,
+        )
+        payment.raise_for_status()
+        payment_row = next(
+            row
+            for row in self.client.get("/api/payments", headers=self.headers).json()
+            if row["payment_no"] == payment.json()["payment_no"]
+        )
+        voided = self.client.post(
+            f"/api/payments/{payment_row['id']}/void",
+            headers=reviewer_headers,
+        )
+        voided.raise_for_status()
+        retained = next(
+            row
+            for row in self.client.get("/api/payments", headers=self.headers).json()
+            if row["id"] == payment_row["id"]
+        )
+        self.assertEqual(retained["status"], "voided")
+        self.assertEqual(retained["allocated"], 0)
+        self.assertIsNotNone(retained["voided_at"])
+        duplicate_void = self.client.post(
+            f"/api/payments/{payment_row['id']}/void",
+            headers=reviewer_headers,
+        )
+        self.assertEqual(duplicate_void.status_code, 400)
+        reconciliation = self.client.get("/api/reconciliation", headers=self.headers).json()
+        invoice_row = next(row for row in reconciliation if row["id"] == invoice_id)
+        self.assertEqual(invoice_row["allocated"], 0)
+        self.assertEqual(invoice_row["balance"], 30)
+        cash_after = self.client.get("/api/cash-summary", headers=self.headers).json()["receipts"]
+        self.assertEqual(cash_after, cash_before)
+        with self.main.SessionLocal() as session:
+            stored = session.get(self.main.Payment, payment_row["id"])
+            allocation = session.query(self.main.PaymentAllocation).filter_by(payment_id=stored.id).one()
+            self.assertEqual(stored.status, "voided")
+            self.assertIsNotNone(stored.reversal_journal_id)
+            self.assertFalse(allocation.active)
+
+    def test_money_is_rounded_and_stored_as_decimal(self):
+        draft = self.client.post(
+            "/api/invoices",
+            json={
+                "kind": "sale",
+                "party_id": 2,
+                "warehouse_id": 1,
+                "lines": [{"product_id": 1, "qty": 3, "unit_price": "0.10"}],
+                "tax_rate": "5.00",
+            },
+            headers=self.headers,
+        )
+        draft.raise_for_status()
+        with self.main.SessionLocal() as session:
+            stored = session.get(self.main.Invoice, draft.json()["id"])
+            self.assertIsInstance(stored.subtotal, Decimal)
+            self.assertEqual(stored.subtotal, Decimal("0.30"))
+            self.assertEqual(stored.tax_amount, Decimal("0.02"))
+            self.assertEqual(stored.total, Decimal("0.32"))
+
+    def test_health_route_is_defined_once(self):
+        health_routes = [
+            route
+            for route in self.main.app.routes
+            if getattr(route, "path", None) == "/api/health" and "GET" in getattr(route, "methods", set())
+        ]
+        self.assertEqual(len(health_routes), 1)
 
 
 if __name__ == "__main__":

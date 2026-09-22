@@ -49,3 +49,19 @@ This is still a development foundation. Before using it for statutory accounting
 | View audit logs and system checks | Yes | No | No |
 
 Stock cannot go below zero. Transfers and adjustments require a reason and are retained in audit history. A document creator cannot approve their own quotation, purchase order, or invoice, and cannot post their own invoice.
+
+## Release-control safeguards
+
+- Invoices are always created as drafts. Immediate posting is rejected by the API and is not offered by the frontend.
+- Every new or converted invoice stores its creator and source document. Approval and posting fail closed when creator identity is unavailable, and the creator cannot approve or post the same invoice.
+- A purchase-order goods receipt is the stock-recognition event. The related converted supplier invoice requires that receipt and posts only the accounting entry, so stock is not counted twice.
+- Voiding a receipt or payment retains the original payment and allocation rows, marks allocations inactive, and links the reversing journal, actor, and timestamp.
+- Monetary database fields use fixed-precision `NUMERIC` values and application calculations use `Decimal` with half-up rounding to two decimal places.
+- Inventory users receive operational dashboard and product data without financial totals, prices, invoices, journals, accounts, trial balance, financial reports, or reconciliation data.
+
+Run the current safety and migration suite with:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+```
