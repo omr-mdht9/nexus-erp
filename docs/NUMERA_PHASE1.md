@@ -1,36 +1,37 @@
-# NUMERA ERP — Phase 1
+# NUMERA ERP — clean-build roadmap
 
-Product name: NUMERA ERP. The existing repository name remains unchanged.
+## Architecture and isolation
 
-## Development isolation
+NUMERA is a new implementation under `numera/`, with no legacy application imports. Development source lives on `numera/development`; main and the existing hosted service remain untouched. All current business records carry a company identity. Company identity comes from the authenticated user, never from form input. Money values in the catalogue use Decimal validation and exact string storage.
 
-Work on `numera/development`; do not merge into main or deploy to the existing application during development. A branch isolates source changes only: a staging service, separate database, credentials, and storage must be provisioned before hosted testing. Never reuse the live DATABASE_URL, JWT secret, production payment credentials, or live business data. Use synthetic sample data. Hosted staging is not yet provisioned.
+The first local milestone uses a separate SQLite database. A PostgreSQL persistence layer, versioned schema migrations and independent hosting/database/secrets are required before a shared staging pilot. No live data is copied.
 
-## First customer scope
+## Build checklist
 
-Small trading businesses, initially one company and one warehouse per customer. Arabic and English, mobile-friendly interfaces. Manufacturing and industry-specific POS are deferred.
+- [x] Separate source branch.
+- [x] Adopt NUMERA ERP branding.
+- [x] Begin a clean application, excluding the legacy ERP.
+- [x] Company registration and login.
+- [x] Owner/accountant/inventory permissions for implemented endpoints.
+- [x] Company-isolated catalogue, employee records and audit history.
+- [x] Landing page, registration and Arabic/English workspace.
+- [x] Development-trial metadata, with billing visibly disabled.
+- [ ] Schema migrations and PostgreSQL persistence.
+- [ ] Stock movements, opening balances and valuation.
+- [ ] Suppliers, purchases and receipts.
+- [ ] Customers, sales and stock deductions.
+- [ ] Controlled sales/purchase returns and corrections.
+- [ ] Payment allocation, cash/bank and expenses.
+- [ ] Balanced accounting and profit/loss reports.
+- [ ] Final pricing, legal pages, support and subscription entitlements.
+- [ ] Test-mode payment provider integration before live checkout.
+- [ ] Separate hosted staging, backups and recovery validation.
+- [ ] Complete business-cycle testing and small-customer pilot.
 
-## Milestones
+## Future modular ERP
 
-- [x] Create isolated source branch.
-- [x] Record NUMERA branding and Phase 1 scope.
-- [ ] Audit existing backend, frontend, migrations, and tests; document reusable components and gaps.
-- [ ] Prepare isolated local environment and baseline verification.
-- [ ] Implement company registration, tenant isolation, roles, audit history, and migrations.
-- [ ] Implement products, opening balances, suppliers, purchases, and stock receipts.
-- [ ] Implement customers, sales, stock deductions, and controlled returns.
-- [ ] Implement payment allocation, cash/bank, and expenses.
-- [ ] Implement balanced accounting entries, consistent costing, stock valuation, and profit/loss.
-- [ ] Build NUMERA marketing homepage, features, pricing, trial signup, login, and support pages.
-- [ ] Connect trials and plan entitlements; decide prices and payment provider before live checkout.
-- [ ] Provision isolated hosted staging with a separate database and secrets.
-- [ ] Verify full business cycle, tenant isolation, permissions, concurrency, and backup restoration.
-- [ ] Pilot with a small customer group; resolve defects before paid launch.
+Use an Odoo-like connected experience with a consistent workspace: Accounting, Sales, Purchases, Inventory, POS, Manufacturing and CRM. Phase 1 supplies the essentials; later modules extend the same company records. Do not advertise future modules or Egyptian e-invoicing as implemented until verified.
 
-## Release gates
+## Milestone 1 limits
 
-A customer must register and complete purchases, sales, returns, payments, expenses, and consistent reporting without developer intervention. Stock and accounting must reconcile. Posted records require controlled reversal/correction. Cross-company access must be denied. Backups must be restored successfully. Egyptian electronic invoicing must not be advertised as available until separately implemented and verified.
-
-## Initial repository findings
-
-The README documents existing inventory, purchase/sales invoices, VAT, COGS, accounting ledgers, roles, and manufacturing features. These are reuse candidates, not verified capabilities. The repository contains a Python backend, static frontend, Alembic migrations, and safety workflow tests. Existing CI runs on main pushes and applicable pull requests; development-branch checks need configuring. Existing Docker Compose uses a single local database and is not a customer-isolated SaaS environment.
+The catalogue does not implement stock quantities or movements. Employee roles are initial role guards, not a completed ERP permission system. Trial expiration is reported but does not enforce paid entitlements. The development auth limiter operates in one process. Sessions live in browser memory and expire after two hours. No hosted application has been deployed. Full browser interaction testing remains pending.

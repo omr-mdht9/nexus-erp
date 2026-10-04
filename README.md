@@ -1,51 +1,47 @@
-# Nexus ERP — v0.2 Manufacturing & Accounting Foundation
+# NUMERA ERP
 
-This release moves the project from a dashboard MVP into a connected ERP foundation.
+A clean modular ERP build. No application code is reused from the previous NEXUS implementation. Work remains on `numera/development`; the main branch and existing hosted application are unchanged.
 
-## Added in v0.2
-- Arabic/English direction toggle
-- VAT 14% on purchase and sales invoices
-- Purchase and sales invoice register
-- Sales COGS posting based on product standard cost
-- Multi-warehouse master data
-- Customers / suppliers master data
-- BOM (Bill of Materials)
-- Production orders with material availability checks
-- Automatic raw-material consumption and finished-goods receipt
-- Production batch/unit costing
-- Receipt/payment journal endpoints
-- Expanded chart of accounts including Input VAT / Output VAT
-- Stock ledger + accounting ledger remain transaction-linked
+## Milestone 1 — implemented
 
-## First-run configuration
-Copy `.env.example` to `.env` and set strong, unique values for all variables. The first start creates the administrator from `NEXUS_INITIAL_ADMIN_USERNAME` and `NEXUS_INITIAL_ADMIN_PASSWORD`. These values are intentionally not stored in the repository.
+- Marketing homepage with roadmap and development-trial signup.
+- Company registration and login with hashed passwords and two-hour bearer sessions.
+- Company-scoped product catalogue, employee roles and audit history.
+- Arabic/English workspace with RTL support.
+- 30-day development-trial metadata. Paid billing and expiry enforcement are not enabled.
 
-## Run
+This is a local development milestone, not a production accounting service. Use synthetic data only.
+
+## Run a separate local environment
+
+Python 3.12 is the tested version. Install dependencies in a fresh virtual environment:
+
 ```bash
-copy .env.example .env
-# Edit .env and set the three required values.
 python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
 ```
-Open `http://127.0.0.1:8000`.
 
-Alternatively, after creating `.env`, run `docker compose up --build`.
+Set `NUMERA_JWT_SECRET` to a unique random secret of at least 32 characters in your shell. Set `NUMERA_DATABASE_PATH` to a new local file, such as `./numera-development.db`. Do not use a database from the previous ERP.
 
-## Important production note
-This is still a development foundation. Before using it for statutory accounting or live company transactions, we need to complete approvals, fiscal periods, document numbering rules, returns, payments allocation, landed cost, purchase/sales workflow, audit logs, backups, PostgreSQL migration, user permissions, and Egyptian e-invoicing/tax integration.
+```bash
+python -m uvicorn numera.main:create_app --factory --host 127.0.0.1 --port 8100
+```
 
+Open `http://127.0.0.1:8100`. Registration creates an empty company; no demo products or opening stock are automatically inserted. Tokens are held in browser memory; reloading requires login. Currency is a company setting, not a multicurrency accounting implementation.
 
-## Build-stage permission matrix
+```bash
+python -m unittest discover -s tests -v
+node --check numera/static/workspace.js
+```
 
-| Activity | Admin | Accountant | Inventory |
-|---|---:|---:|---:|
-| Manage users and roles | Yes | No | No |
-| Create products, warehouses, BOMs, production, transfers, and stock adjustments | Yes | No | Yes |
-| Create/approve financial and commercial documents | Yes, with independent-approval rules | Yes, with independent-approval rules | No |
-| View financial reports and reconciliation | Yes | Yes | No |
-| Review transfer and adjustment history | Yes | No | Yes |
-| View audit logs and system checks | Yes | No | No |
+## Next milestones
 
-Stock cannot go below zero. Transfers and adjustments require a reason and are retained in audit history. A document creator cannot approve their own quotation, purchase order, or invoice, and cannot post their own invoice.
+Inventory movements and opening balances; purchases and sales; payments, returns and expenses; balanced accounting and reports. The long-term product is an Odoo-like modular ERP, including POS, manufacturing, CRM and advanced accounting.
+
+## Hosted release gates
+
+Provision separate staging resources and secrets. Introduce schema migrations and a PostgreSQL persistence layer before shared hosted use; the initial SQLite schema is for local development. Add email verification, password recovery, session revocation, distributed rate limiting, employee lifecycle controls and subscription entitlements. Implement and test backups and restoration. Verify tenant isolation on every future endpoint. Test accounting, stock concurrency and tax integrations before a paid launch. Marketing pages currently do not include final legal terms, a payment checkout or a public support channel.
+
+Browser visual verification and hosted deployment have not yet been performed. Automated API and static-route checks are provided.
