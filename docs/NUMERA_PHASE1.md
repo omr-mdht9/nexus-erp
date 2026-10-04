@@ -17,7 +17,8 @@ The first local milestone uses a separate SQLite database. A PostgreSQL persiste
 - [x] Landing page, registration and Arabic/English workspace.
 - [x] Development-trial metadata, with billing visibly disabled.
 - [ ] Schema migrations and PostgreSQL persistence.
-- [ ] Stock movements, opening balances and valuation.
+- [x] Opening quantities, receipts, issues, adjustments, low-stock indicators and movement history.
+- [ ] Stock costs and valuation.
 - [ ] Suppliers, purchases and receipts.
 - [ ] Customers, sales and stock deductions.
 - [ ] Controlled sales/purchase returns and corrections.
@@ -32,6 +33,10 @@ The first local milestone uses a separate SQLite database. A PostgreSQL persiste
 
 Use an Odoo-like connected experience with a consistent workspace: Accounting, Sales, Purchases, Inventory, POS, Manufacturing and CRM. Phase 1 supplies the essentials; later modules extend the same company records. Do not advertise future modules or Egyptian e-invoicing as implemented until verified.
 
-## Milestone 1 limits
+## Current milestone limits
 
-The catalogue does not implement stock quantities or movements. Employee roles are initial role guards, not a completed ERP permission system. Trial expiration is reported but does not enforce paid entitlements. The development auth limiter operates in one process. Sessions live in browser memory and expire after two hours. No hosted application has been deployed. Full browser interaction testing remains pending.
+Stock movements do not yet generate accounting entries or valuation. The first-release warehouse is implicit and single. Employee roles are initial role guards, not a completed ERP permission system. Trial expiration is reported but does not enforce paid entitlements. The development auth limiter operates in one process. Sessions live in browser memory and expire after two hours. No hosted application has been deployed. Full browser interaction testing remains pending.
+
+## Inventory validation
+
+Opening balances are allowed only before the first movement. Movements require reasons, are append-only through the API, and are scoped to the authenticated company. Composite product foreign keys reject cross-company references at the database layer. Exact quantities use integer thousandths. Posting locks the write transaction before checking stock; duplicate request keys are replayed without posting twice. Tests cover concurrent issues, precision, permissions, negative-stock prevention, retries, tenant isolation and persistence on restart.

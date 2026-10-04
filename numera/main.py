@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jose import jwt, JWTError
 from pydantic import BaseModel, Field, field_validator
+from numera.inventory import SCHEMA as INVENTORY_SCHEMA, build_router
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA = """
@@ -41,7 +42,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 
 def connection(app):
-    conn = sqlite3.connect(app.state.database_path, timeout=15)
+    # FastAPI may run dependency setup and the endpoint on different worker threads.
+    # The connection remains request-scoped; write transactions serialize stock posting.
+    conn = sqlite3.connect(app.state.database_path, timeout=15, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys=ON')
     return conn
@@ -176,12 +179,13 @@ def create_app(database_path=None, secret=None):
         conn = connection(app)
         try:
             conn.executescript(SCHEMA)
+            conn.executescript(INVENTORY_SCHEMA)
             conn.commit()
         finally:
             conn.close()
         yield
 
-    app = FastAPI(title='NUMERA ERP development', version='0.1.0', lifespan=lifespan)
+    app = FastAPI(title='NUMERA ERP development', version='0.2.0', lifespan=lifespan)
     app.state.database_path = str(path)
     app.state.secret = key
     app.state.auth_attempts = {}
@@ -232,7 +236,7 @@ def create_app(database_path=None, secret=None):
     @app.get('/api/health')
     def health(conn=Depends(database)):
         conn.execute('SELECT 1')
-        return {'status': 'ok', 'product': 'NUMERA ERP', 'version': '0.1.0', 'environment': 'development'}
+        return {'status': 'ok', 'product': 'NUMERA ERP', 'version': '0.2.0', 'environment': 'development'}
 
     @app.post('/api/auth/register', status_code=201)
     def register(data: Registration, request: Request, conn=Depends(database)):
@@ -307,4 +311,5 @@ def create_app(database_path=None, secret=None):
     def audit_logs(user=Depends(roles('owner')), conn=Depends(database)):
         return [dict(r) for r in conn.execute('SELECT id,actor_id,action,entity_type,entity_id,created_at FROM audit_logs WHERE company_id=? ORDER BY id DESC LIMIT 200', (user['company_id'],))]
 
+    app.include_router(build_router(database, current_user, roles, audit, now))
     return app
