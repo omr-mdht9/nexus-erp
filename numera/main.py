@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from jose import jwt, JWTError
 from pydantic import BaseModel, Field, field_validator
 from numera.inventory import SCHEMA as INVENTORY_SCHEMA, build_router
+from numera.purchases import SCHEMA as PURCHASE_SCHEMA, build_router as purchase_router
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA = """
@@ -180,12 +181,13 @@ def create_app(database_path=None, secret=None):
         try:
             conn.executescript(SCHEMA)
             conn.executescript(INVENTORY_SCHEMA)
+            conn.executescript(PURCHASE_SCHEMA)
             conn.commit()
         finally:
             conn.close()
         yield
 
-    app = FastAPI(title='NUMERA ERP development', version='0.2.0', lifespan=lifespan)
+    app = FastAPI(title='NUMERA ERP development', version='0.3.0', lifespan=lifespan)
     app.state.database_path = str(path)
     app.state.secret = key
     app.state.auth_attempts = {}
@@ -236,7 +238,7 @@ def create_app(database_path=None, secret=None):
     @app.get('/api/health')
     def health(conn=Depends(database)):
         conn.execute('SELECT 1')
-        return {'status': 'ok', 'product': 'NUMERA ERP', 'version': '0.2.0', 'environment': 'development'}
+        return {'status': 'ok', 'product': 'NUMERA ERP', 'version': '0.3.0', 'environment': 'development'}
 
     @app.post('/api/auth/register', status_code=201)
     def register(data: Registration, request: Request, conn=Depends(database)):
@@ -312,4 +314,5 @@ def create_app(database_path=None, secret=None):
         return [dict(r) for r in conn.execute('SELECT id,actor_id,action,entity_type,entity_id,created_at FROM audit_logs WHERE company_id=? ORDER BY id DESC LIMIT 200', (user['company_id'],))]
 
     app.include_router(build_router(database, current_user, roles, audit, now))
+    app.include_router(purchase_router(database, current_user, roles, audit, now))
     return app

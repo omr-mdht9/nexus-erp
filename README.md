@@ -2,7 +2,7 @@
 
 A clean modular ERP build. No application code is reused from the previous NEXUS implementation. Work remains on `numera/development`; the main branch and existing hosted application are unchanged.
 
-## Milestones 1–2 — implemented
+## Milestones 1–3 — implemented
 
 - Marketing homepage with roadmap and development-trial signup.
 - Company registration and login with hashed passwords and two-hour bearer sessions.
@@ -10,6 +10,8 @@ A clean modular ERP build. No application code is reused from the previous NEXUS
 - Single-warehouse opening stock, receipts, issues, adjustments, balances and low-stock indicators.
 - Exact quantities to three decimal places, immutable movement history and retry-safe posting.
 - Arabic/English workspace with RTL support.
+- Supplier master records and multi-product purchase drafts with document dates, due dates and supplier references.
+- Full goods receipts atomically update stock, with retry/concurrency protection and role-specific receiving views.
 - 30-day development-trial metadata. Paid billing and expiry enforcement are not enabled.
 
 This is a local development milestone, not a production accounting service. Use synthetic data only.
@@ -36,20 +38,29 @@ Open `http://127.0.0.1:8100`. Registration creates an empty company; no demo pro
 ```bash
 python -m unittest discover -s tests -v
 node --check numera/static/workspace.js
+node --check numera/static/purchases.js
 ```
 
 ## Next milestones
 
-Purchases and sales; payments, returns and expenses; stock valuation, balanced accounting and reports. The long-term product is an Odoo-like modular ERP, including POS, manufacturing, CRM and advanced accounting.
+Sales; payments, returns and expenses; stock valuation, balanced accounting and reports. The long-term product is an Odoo-like modular ERP, including POS, manufacturing, CRM and advanced accounting.
 
 ## Hosted release gates
 
 Provision separate staging resources and secrets. Introduce schema migrations and a PostgreSQL persistence layer before shared hosted use; the initial SQLite schema is for local development. Add email verification, password recovery, session revocation, distributed rate limiting, employee lifecycle controls and subscription entitlements. Implement and test backups and restoration. Verify tenant isolation on every future endpoint. Test accounting, stock concurrency and tax integrations before a paid launch. Marketing pages currently do not include final legal terms, a payment checkout or a public support channel.
 
-Browser visual verification and hosted deployment have not yet been performed. Automated API and static-route checks are provided. The suite contains 23 tests, including simultaneous stock issues and inventory persistence across restart.
+Browser visual verification and hosted deployment have not yet been performed. Automated API and static-route checks are provided. The suite contains 34 tests, including simultaneous stock issues and inventory persistence across restart.
 
 ## Inventory usage
 
 Create products, then use the inventory panel to record opening stock before any other movement on each product. Receipts and positive adjustments add quantity; issues and negative adjustments subtract it. Each posting requires a reason and a client request key. Repeating an identical request returns the original movement; changing its contents with the same key is rejected. A product cannot go below zero. History shows the latest 200 movements; prior entries remain in the database. Corrections use a new adjustment.
 
 Quantities use integer thousandths in storage, with a maximum balance of 99,999,999,999.999 units. SQLite write transactions serialize availability checks and posting. No costs, inventory valuation or accounting entries are generated yet; receipts/issues are manual development operations, not purchase or sales documents. The warehouse is implicitly the single main warehouse in this milestone.
+
+## Purchase usage and limits
+
+Owners/accountants create suppliers and purchase drafts. Add one line per product with quantity, tax-exclusive unit price and an explicitly chosen tax percentage; zero is the default, not a tax-law determination. Server totals use Decimal with half-up rounding per line and integer minor-unit storage. Documents use the company currency only.
+
+Owners/inventory staff receive the full purchase; it creates one linked stock movement per line in a single transaction. Retrying or concurrently receiving the same purchase cannot add stock twice. Warehouse staff receive a quantity-only view without supplier prices. A draft can be cancelled by an owner/accountant; received documents cannot be cancelled. Partial receiving and purchase returns are not implemented.
+
+These records are operational drafts and received purchases, not a completed statutory bill/accounting workflow. Supplier payments, outstanding balances, cost valuation and accounting posting remain pending. Due dates are stored and displayed; no reminder service is enabled. Purchase numbers are internal identifiers, not a statutory numbering scheme.

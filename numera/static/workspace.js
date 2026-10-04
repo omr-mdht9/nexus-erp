@@ -4,6 +4,8 @@ let profile = null;
 let language = 'en';
 let stockBalances = [];
 let pendingMovement = null;
+let pendingPurchase = null;
+let catalogue = [];
 const $ = id => document.getElementById(id);
 const en = {};
 document.querySelectorAll('[data-i18n]').forEach(el => { en[el.dataset.i18n] = el.textContent; });
@@ -25,9 +27,9 @@ function showAuth() {
   $('show-register').setAttribute('aria-selected', String(!login));
 }
 function logout() {
-  token = null; profile = null; stockBalances = []; pendingMovement = null;
+  token = null; profile = null; stockBalances = []; pendingMovement = null; pendingPurchase = null; catalogue = [];
   $('dashboard').hidden = true; $('auth').hidden = false; $('logout').hidden = true;
-  ['products','team','audit','company-heading','account-detail','trial-status','stock-balances','stock-history','movement-product'].forEach(id => { $(id).replaceChildren(); });
+  ['products','team','audit','company-heading','account-detail','trial-status','stock-balances','stock-history','movement-product','suppliers','purchase-register','purchase-supplier','purchase-lines'].forEach(id => { $(id).replaceChildren(); });
   document.querySelectorAll('form').forEach(form => form.reset());
 }
 async function api(path, data) {
@@ -61,8 +63,10 @@ async function refresh() {
   $('trial-status').textContent = subscription.status === 'trial' ? t(`Development trial until ${date}`, `التجربة التطويرية حتى ${date}`) : t('Development trial expired', 'انتهت التجربة التطويرية');
   $('product-panel').hidden = !['owner','inventory'].includes(user.role);
   $('team-panel').hidden = user.role !== 'owner'; $('audit-panel').hidden = user.role !== 'owner';
-  tableRows('products', await api('/api/products'), ['sku','name','unit','sale_price','reorder_level']);
+  catalogue = await api('/api/products');
+  tableRows('products', catalogue, ['sku','name','unit','sale_price','reorder_level']);
   await refreshInventory(user);
+  await refreshPurchases(user);
   if (user.role === 'owner') {
     tableRows('team', await api('/api/users'), ['name','email','role']);
     const entries = await api('/api/audit-logs'); $('audit').replaceChildren();
@@ -92,7 +96,7 @@ async function refreshInventory(user) {
 }
 function submit(id, handler) {
   $(id).addEventListener('submit', async event => {
-    event.preventDefault(); message(); const form = event.currentTarget; const button = form.querySelector('button'); button.disabled = true;
+    event.preventDefault(); message(); const form = event.currentTarget; const button = form.querySelector('button[type="submit"], button:not([type])'); button.disabled = true;
     try { await handler(Object.fromEntries(new FormData(form)), form); }
     catch (error) { message(error.message, true); }
     finally { button.disabled = false; }
@@ -121,4 +125,4 @@ $('show-login').addEventListener('click', () => { location.hash = 'login'; });
 $('logout').addEventListener('click', () => { logout(); message(t('Signed out.', 'تم تسجيل الخروج.')); });
 $('language').addEventListener('click', async () => { language = language === 'en' ? 'ar' : 'en'; translate(); if (token) { try { await refresh(); } catch (error) { message(error.message, true); } } });
 window.addEventListener('hashchange', showAuth);
-translate(); showAuth();
+initializePurchases(); translate(); showAuth();

@@ -19,7 +19,8 @@ The first local milestone uses a separate SQLite database. A PostgreSQL persiste
 - [ ] Schema migrations and PostgreSQL persistence.
 - [x] Opening quantities, receipts, issues, adjustments, low-stock indicators and movement history.
 - [ ] Stock costs and valuation.
-- [ ] Suppliers, purchases and receipts.
+- [x] Suppliers, multi-product purchase drafts, dates/references and full goods receipts.
+- [ ] Purchase returns and partial receipts.
 - [ ] Customers, sales and stock deductions.
 - [ ] Controlled sales/purchase returns and corrections.
 - [ ] Payment allocation, cash/bank and expenses.
@@ -40,3 +41,7 @@ Stock movements do not yet generate accounting entries or valuation. The first-r
 ## Inventory validation
 
 Opening balances are allowed only before the first movement. Movements require reasons, are append-only through the API, and are scoped to the authenticated company. Composite product foreign keys reject cross-company references at the database layer. Exact quantities use integer thousandths. Posting locks the write transaction before checking stock; duplicate request keys are replayed without posting twice. Tests cover concurrent issues, precision, permissions, negative-stock prevention, retries, tenant isolation and persistence on restart.
+
+## Purchase validation
+
+Full goods receipt and linked stock movements share one write transaction; every line rolls back if a line fails. Repeated receipt does not post twice. Purchase creation is retry-safe and supplier references are unique per company/supplier when supplied. Draft cancellation preserves history. Owner/accountant roles create documents; owner/inventory roles receive them. Inventory staff cannot read prices. Tests cover exact totals, duplicate references, retries, simultaneous receipts, permission boundaries, tenant isolation and rollback.

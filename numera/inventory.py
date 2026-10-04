@@ -35,6 +35,13 @@ class MovementIn(BaseModel):
     reason: str = Field(min_length=3, max_length=200)
     request_key: str = Field(min_length=16, max_length=80, pattern=r'^[a-zA-Z0-9_-]+$')
 
+    @field_validator('request_key')
+    @classmethod
+    def reserved_key(cls, value):
+        if value.startswith('sys_'):
+            raise ValueError('System request keys are reserved')
+        return value
+
     @field_validator('reason')
     @classmethod
     def reason_text(cls, value):
