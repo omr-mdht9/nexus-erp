@@ -23,7 +23,8 @@ The first local milestone uses a separate SQLite database. A PostgreSQL persiste
 - [ ] Purchase returns and partial receipts.
 - [x] Customers, multi-product sales drafts, dates/references and atomic stock deductions.
 - [ ] Controlled sales/purchase returns and corrections.
-- [ ] Payment allocation, cash/bank and expenses.
+- [x] Document-linked partial/full payments, current balances, payment voids and recorded cash/bank settlement summaries.
+- [ ] Advances, multi-document allocations, bank reconciliation and expenses.
 - [ ] Balanced accounting and profit/loss reports.
 - [ ] Final pricing, legal pages, support and subscription entitlements.
 - [ ] Test-mode payment provider integration before live checkout.
@@ -49,3 +50,7 @@ Full goods receipt and linked stock movements share one write transaction; every
 ## Sales validation
 
 Sales drafts leave stock unchanged. Posting links each invoice line to an inventory issue in the same write transaction. Stock shortage rolls back all issues; status remains draft. Repeated or simultaneous posting is safe. Posted documents cannot be cancelled. Tests cover exact totals, retries, cross-company access, role guards, competing sales, same-invoice concurrent posting and the purchase-to-sale stock cycle.
+
+## Settlement validation
+
+Only posted sales and received purchases can be settled. Cash/bank records are company-scoped and restricted to financial roles. Payments cannot exceed current outstanding amounts; allocation checks and insertions share a write transaction. Voids preserve original records and require reasons. Tests cover partial/full payments, exact balances, duplicates, overpayments, concurrent allocation, void history, overdue classification and permission boundaries.

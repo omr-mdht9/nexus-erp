@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from numera.inventory import SCHEMA as INVENTORY_SCHEMA, build_router
 from numera.purchases import SCHEMA as PURCHASE_SCHEMA, build_router as purchase_router
 from numera.sales import SCHEMA as SALES_SCHEMA, build_router as sales_router
+from numera.payments import SCHEMA as PAYMENT_SCHEMA, build_router as payment_router
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA = """
@@ -184,12 +185,13 @@ def create_app(database_path=None, secret=None):
             conn.executescript(INVENTORY_SCHEMA)
             conn.executescript(PURCHASE_SCHEMA)
             conn.executescript(SALES_SCHEMA)
+            conn.executescript(PAYMENT_SCHEMA)
             conn.commit()
         finally:
             conn.close()
         yield
 
-    app = FastAPI(title='NUMERA ERP development', version='0.4.0', lifespan=lifespan)
+    app = FastAPI(title='NUMERA ERP development', version='0.5.0', lifespan=lifespan)
     app.state.database_path = str(path)
     app.state.secret = key
     app.state.auth_attempts = {}
@@ -240,7 +242,7 @@ def create_app(database_path=None, secret=None):
     @app.get('/api/health')
     def health(conn=Depends(database)):
         conn.execute('SELECT 1')
-        return {'status': 'ok', 'product': 'NUMERA ERP', 'version': '0.4.0', 'environment': 'development'}
+        return {'status': 'ok', 'product': 'NUMERA ERP', 'version': '0.5.0', 'environment': 'development'}
 
     @app.post('/api/auth/register', status_code=201)
     def register(data: Registration, request: Request, conn=Depends(database)):
@@ -318,4 +320,5 @@ def create_app(database_path=None, secret=None):
     app.include_router(build_router(database, current_user, roles, audit, now))
     app.include_router(purchase_router(database, current_user, roles, audit, now))
     app.include_router(sales_router(database, current_user, roles, audit, now))
+    app.include_router(payment_router(database, roles, audit, now))
     return app
