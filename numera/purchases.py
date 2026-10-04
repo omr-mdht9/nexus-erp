@@ -55,7 +55,7 @@ class SupplierIn(BaseModel):
     @field_validator('name')
     @classmethod
     def name_length(cls,value):
-        if len(value)<2: raise ValueError('Enter a supplier name of at least two characters')
+        if len(value)<2: raise ValueError('Enter a name of at least two characters')
         return value
 
 class PurchaseLineIn(BaseModel):

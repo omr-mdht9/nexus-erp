@@ -21,7 +21,7 @@ The first local milestone uses a separate SQLite database. A PostgreSQL persiste
 - [ ] Stock costs and valuation.
 - [x] Suppliers, multi-product purchase drafts, dates/references and full goods receipts.
 - [ ] Purchase returns and partial receipts.
-- [ ] Customers, sales and stock deductions.
+- [x] Customers, multi-product sales drafts, dates/references and atomic stock deductions.
 - [ ] Controlled sales/purchase returns and corrections.
 - [ ] Payment allocation, cash/bank and expenses.
 - [ ] Balanced accounting and profit/loss reports.
@@ -45,3 +45,7 @@ Opening balances are allowed only before the first movement. Movements require r
 ## Purchase validation
 
 Full goods receipt and linked stock movements share one write transaction; every line rolls back if a line fails. Repeated receipt does not post twice. Purchase creation is retry-safe and supplier references are unique per company/supplier when supplied. Draft cancellation preserves history. Owner/accountant roles create documents; owner/inventory roles receive them. Inventory staff cannot read prices. Tests cover exact totals, duplicate references, retries, simultaneous receipts, permission boundaries, tenant isolation and rollback.
+
+## Sales validation
+
+Sales drafts leave stock unchanged. Posting links each invoice line to an inventory issue in the same write transaction. Stock shortage rolls back all issues; status remains draft. Repeated or simultaneous posting is safe. Posted documents cannot be cancelled. Tests cover exact totals, retries, cross-company access, role guards, competing sales, same-invoice concurrent posting and the purchase-to-sale stock cycle.
