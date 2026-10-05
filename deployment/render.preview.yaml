@@ -1,0 +1,26 @@
+# Proposed internal preview only. Do not apply until Omar approves the workspace and recurring cost.
+# Use branch numera/development and this Blueprint path in Render. Never merge into main to deploy.
+services:
+  - type: web
+    name: numera-erp-preview
+    runtime: python
+    repo: https://github.com/omr-mdht9/nexus-erp
+    branch: numera/development
+    region: frankfurt
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn numera.main:create_app --factory --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: NUMERA_DATABASE_PATH
+        value: /var/data/numera-preview.db
+      - key: NUMERA_JWT_SECRET
+        generateValue: true
+    disk:
+      name: numera-preview-data
+      mountPath: /var/data
+      sizeGB: 1
